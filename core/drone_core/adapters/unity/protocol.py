@@ -21,7 +21,8 @@ Unity -> Python
                               range < 0 = no echo.
 Python -> Unity
     MSG_COMMAND (2): JSON {"forward","right","up" (m/s), "yaw_rate" (rad/s, + = turn right),
-                           optional "est": {"has":1,"x","y","h","r","state"} for the ghost target}
+                           optional "est": {"has":1,"x","y","h","r","state",
+                           "modes":[{"x","y","w"}] (v2, while hidden)} for the ghost target}
     MSG_RESET   (5): empty — respawn drone & target
     MSG_MAP     (6): Py->Unity, the 3-D obstacle map to draw: uint32 LE count | float32 LE voxel size (m) |
                      count x (int16 LE x, y, z in cm, core world frame: x east, y north, z up)
@@ -56,11 +57,16 @@ def encode(msg_type: int, payload: bytes = b"") -> bytes:
 def encode_command(cmd: VelocityCommand, est: dict | None = None) -> bytes:
     """est (optional, for the ghost target in Unity): where the core thinks the
     target is. {"x","y"} core world metres (= Unity x, z), "h" height of what the
-    tracker boxes (m), "r" re-lock radius (m), "state" follow state."""
+    tracker boxes (m), "r" re-lock radius (m), "state" follow state, and (v2,
+    while the target is hidden) "modes": [{"x","y","w"}] top belief clusters."""
     d = {"forward": cmd.forward, "right": cmd.right, "up": cmd.up, "yaw_rate": cmd.yaw_rate}
     if est is not None:
         d["est"] = {"has": 1, "x": round(est["x"], 3), "y": round(est["y"], 3), "h": round(est.get("h", 1.8), 2),
                     "r": round(est.get("r", 0.5), 2), "state": est.get("state", "")}
+        if est.get("modes"):
+            # v2: the top clusters of the belief, heaviest first (Unity fades the others)
+            d["est"]["modes"] = [{"x": round(m["x"], 2), "y": round(m["y"], 2), "w": round(m["w"], 3)}
+                                 for m in est["modes"][:3]]
     return encode(MSG_COMMAND, json.dumps(d).encode())
 
 

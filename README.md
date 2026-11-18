@@ -32,6 +32,10 @@ core/
                               frames, predicts across camera latency
       surround_map.py         top-down obstacle map built from the 4 cameras' depth
       target_geo.py           ground position + velocity of the target from box + drone pose
+      target_belief.py        v2: particle cloud of where a hidden target is (walk / turn / stop /
+                              inside), kept out of walls, emptied where the cameras see nobody
+      viewpoints.py           v2: pick the spot that sees the most of that cloud (climbs over low walls)
+      voxel_map.py            3-D map from sonar + depth; line of sight, obstacle-height queries
       follow_target.py        visual servo: yaw←x offset, climb←y offset, forward←log(box height)
                               + COASTING → REACQUIRING → SEARCHING → IDLE when the target is lost
       flight_supervisor.py    FOLLOW / HOLD / RTH modes; low-battery and geofence failsafes
@@ -136,8 +140,10 @@ A see-through person in Unity marks where the Python core *thinks* the target is
 with a ring on the ground and a label ("drone thinks: TRACKING"):
 
 * **green**: it sees the person. The ghost should sit on them; the gap is its distance error.
-* **orange**: the person is hidden. The ghost walks on along the predicted path and the
-  ring grows: that's the area where it will accept someone as the target again.
+* **orange**: the person is hidden. Since v2 the ghost is the core's **best guess** out of
+  a cloud of possibilities (stopped behind the wall, walked on, turned the corner, went
+  into the shop). One or two **fainter ghosts** show the next-best guesses, more see-through
+  the less likely they are. The ring shows how spread out the best guess is.
 * **cyan**: TURNING toward a side/back camera. **Grey**: gave up.
 
 The ghost is on the debug layer, so the drone's own cameras never see it. V toggles it.
@@ -168,28 +174,49 @@ matches by appearance, which keeps ids through short occlusions.
 
 ### Performance benchmark
 
-```bash
-python tools/benchmark.py --version v2 --notes "what changed"
+```powershell
+python tools\benchmark.py --version v3 --notes "what changed"
+python tools\benchmark.py --version test --suite 2 --jobs 4 --no-save   # quick look, ~2 min
 ```
 
-flies 11 fixed scenarios in the mock sim (circle, sprint, walking at the drone,
-pillar occlusion, a look-alike at the exit, id swaps, a crowd, a bad detector, a branch,
-the Unity colour tracker...). It scores time on the right person, time on the wrong
-person, distance, re-lock time, clearance and CPU time per tick, then saves
-`benchmarks/vN.json` and rewrites `benchmarks/REPORT.md` with every version side by side.
-Same seeds every time, so changes in the numbers come from the code. About 3 minutes.
+**Suite 1** flies the 11 original scenarios in the mock sim (circle, sprint, walking at the
+drone, pillar occlusion, a look-alike at the exit, id swaps, a crowd, a bad detector, a
+branch, the Unity colour tracker...). **Suite 2** (since v2, the occlusion suite) has real
+walls, buildings and a shop, a front depth camera feeding the 3-D map, and 6 scenarios in
+2 variants each: stops behind a pillar, turns round a building corner, U-turn behind a
+wall, goes into a shop and out by the same or another door, a look-alike at the shop door,
+a low wall that can be seen over. It scores time on the right person, time on the wrong
+person, distance, re-lock time, clearance and CPU time per tick, and for suite 2 also
+how far the ghost was from the real person (`ghost m`), how often the person was within
+2 m of one of the top 3 guesses (`top3 %`) and how fast it re-found them once visible
+(`refind s`). It saves `benchmarks/vN.json` and rewrites `benchmarks/REPORT.md` with every
+version side by side. Same seeds every time, so changes in the numbers come from the code.
+About 12 minutes for both suites; `--jobs 4` runs scenarios in parallel (then the tick
+times aren't comparable). `--legacy` runs the v1 loss handling for comparison.
 
 ### When the target disappears
 
 1. **COASTING** (up to 0.6 s): the Kalman filter keeps predicting the box, so a few
    missed detections don't change anything.
-2. **REACQUIRING** (up to 8 s): the core has been estimating the person's ground position
-   and walking speed from the box and the drone's pose. It flies toward where they should
-   be now, nose pointed at that spot, climbing 2 m to see over low things. The obstacle
-   filter steers it around the wall, on the side it is already turning toward.
-3. **SEARCHING** (20 s): circles the spot where the person should be by now, 4 m radius
-   at first and 2 m wider every lap, nose to the centre. With cameras all round, moving
-   to new viewpoints is what finds someone behind a car or a wall.
+2. **Belief (v2).** From then on the core keeps a cloud of 2,000 guesses
+   (`usecases/target_belief.py`). Each guess walks on, turns (a corner, a U-turn), stops,
+   or goes **inside** something (a guess that walks into a wall on the map either slides
+   along it or went through a door), with walking speeds, stop and turn rates from
+   pedestrian studies. Guesses can't walk through mapped walls. Every frame, guesses the
+   cameras could clearly see (in view, in range, nothing in between on the 3-D map) lose
+   weight, because nobody was there: looking at an empty street pushes the cloud behind
+   the wall. Places the map hasn't seen don't count as "seen empty". Someone else standing
+   there (a decoy) doesn't count either: the target could be right behind them.
+3. **REACQUIRING** (up to 8 s) and **SEARCHING** (20 s): with the 3-D map, the drone flies
+   to the **viewpoint that would see the most of the cloud soonest** (`usecases/viewpoints.py`,
+   re-planned 3 times a second, only switching for a 20% better spot). Candidates sit on
+   rings round the top guesses. If a mapped wall is in the way, the candidate is raised
+   just enough to see over it (**obstacle-height query**, `VoxelMap.height_at` /
+   `top_between`), never above 10 m, never into something overhead (needs 1 m clear), and
+   only when the map has seen open air above that wall (a tall pillar it hasn't seen the
+   top of isn't "low"). Guesses that went inside count at their door, so the drone ends
+   up watching the door. Without a map (`--no-map`, the real drone today) it keeps the
+   v1 flight: toward the predicted spot, then circles it 4 m out and 2 m wider every lap.
 4. **LOITER** (60 s): flies back to where the person was last seen and hovers there.
 5. **GAVE_UP**: forgets the target and the supervisor flies home (**RTH (target lost)**).
    Press `f` to follow again.
@@ -198,8 +225,10 @@ Obstacle avoidance and the battery / geofence failsafes stay on the whole time. 
 `orbit_s`, `orbit_radius`, `orbit_growth`, `loiter_s` in `FollowConfig`.
 
 **Re-locking.** When someone reappears after an occlusion, ByteTrack usually gives them a
-new id. The core re-locks only on a person within ~4 m of the predicted spot (more the
-longer they were hidden), and only after seeing them there for 0.5 s (**CONFIRMING** when
+new id. Since v2 the core re-locks only on a person where the cloud says the target could
+be (enough guesses within 1.5 m, or near one of the top 3 guesses), so a person who
+**stopped** where they vanished is accepted even when most guesses walked on. It also waits
+until it has seen them there for 0.5 s (**CONFIRMING** when
 it's in a side camera), so a decoy elsewhere, or a look-alike that flashes past, isn't
 picked up. A look-alike standing right where the target should be can still win: the core
 checks position, not appearance. This needs the camera numbers in `FollowConfig.camera`
@@ -360,12 +389,24 @@ Every message: `uint32 BE length(type+payload) | uint8 type | payload`.
   A header without `cams` means one JPEG from the front camera.
   Header: `frame_id, t, pos [x,y,z] (Unity world), yaw_deg, alt, battery, vel_body [fwd,right,up], ranges {front,back,left,right,front_left,front_right,down}`,
   and optionally `sonar: {fov, min, max, beams: [[yaw_deg, pitch_deg, range], ...]}` (range < 0 = no echo).
-* Python→Unity `COMMAND (2)`: JSON `{forward, right, up}` m/s, `yaw_rate` rad/s, + = turn right.
+* Python→Unity `COMMAND (2)`: JSON `{forward, right, up}` m/s, `yaw_rate` rad/s, + = turn right,
+  optional `est: {has, x, y, h, r, state, modes: [{x, y, w}]}` for the ghost (`modes`
+  = the top belief guesses while the target is hidden, v2).
 * Python→Unity `RESET (5)`: empty.
 
 Unity hovers if no command arrives for 0.5 s; Python hovers if frames stop for 0.5 s.
 
 ## What's tested and what isn't
+
+* **v2 lost-target estimation (6 new tests, 55 + 1 skipped in all):** mock walls and
+  shops hide people in 3-D (a 2.2 m wall can be seen over from 7 m, nobody can see into a
+  shop), the map measures a known 2.2 m wall's height and says how high to climb to see
+  over it, the belief keeps "stopped" alive next to "walked on", particles don't walk
+  through walls, looking at an empty area moves the belief behind the hedge, and a
+  closed-loop U-turn behind a wall is re-found in 3.4 s (v1: 14.9 s). Occlusion suite
+  score 59.2 (v1) -> 82.2 (v2); the original 11 stay at 92.7. The Unity ghost change
+  (`GhostTarget.cs`, `PythonBridge.cs`) wasn't compiled here: check the Console after
+  opening Unity.
 
 * **Sonar (6 tests):** an 8 cm branch is heard at 3 m and an 8 mm twig is not. Flying
   over open ground leaves no phantom obstacles in the 3-D map, and a branch ends up

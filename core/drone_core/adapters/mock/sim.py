@@ -61,6 +61,11 @@ class MockWorldConfig:
     noise: float = 4.0                    # pixel noise std-dev
     latency_frames: int = 0               # camera delay: frames arrive this many ticks late
     obstacles: tuple = ()                 # vertical pillars: (x, y, radius) in metres
+    # Solid boxes: walls, buildings, shops: ((x0, y0, x1, y1, height), ...) in metres.
+    # They block sight in 3-D (a low wall can be seen over), rangefinders, sonar,
+    # depth and the drone. A person standing inside a box's footprint is inside
+    # the building: hidden from every camera.
+    boxes: tuple = ()
     range_max: float = 20.0
     range_sensors: bool = True            # False = no rangefinders (cameras + map only)
     battery_drain_per_s: float = 0.0      # fraction per second (0 = infinite battery)
@@ -117,6 +122,8 @@ class MockWorld:
         self.battery = max(0.0, self.battery - self.cfg.battery_drain_per_s * dt)
         for ox, oy, r in self.cfg.obstacles:
             self.min_clearance = min(self.min_clearance, math.hypot(self.pos[0] - ox, self.pos[1] - oy) - r)
+        for b in self.cfg.boxes:
+            self.min_clearance = min(self.min_clearance, point_box_dist(self.pos, b))
         for a, b, r in self.cfg.branches:
             d = _point_segment_dist(self.pos, np.array(a, float), np.array(b, float)) - r
             self.min_branch_clearance = min(self.min_branch_clearance, d)
@@ -124,9 +131,13 @@ class MockWorld:
 
     def _line_of_sight_blocked(self) -> bool:
         """Pillars are treated as infinitely tall: they hide the target."""
-        return self._blocked_to(self.target_pos())
+        (w, d, h), base, _, _ = self._person(0)
+        return self._blocked_to(self.target_pos(), 0.0, base + h)
 
-    def _blocked_to(self, tp) -> bool:
+    def _blocked_to(self, tp, z0: float = 0.0, z1: float = 1.8) -> bool:
+        """True if a person standing at tp (feet at z0, head at z1) is hidden:
+        behind a pillar (infinitely tall), inside a building, or behind boxes
+        (walls) so that neither the head nor the chest can be seen."""
         ax, ay = self.pos[0], self.pos[1]
         bx, by = tp[0], tp[1]
         dx, dy = bx - ax, by - ay
@@ -138,6 +149,14 @@ class MockWorld:
             cx, cy = ax + u * dx, ay + u * dy
             if math.hypot(ox - cx, oy - cy) < r:
                 return True
+        if self.cfg.boxes:
+            if inside_box(bx, by, self.cfg.boxes) is not None:
+                return True
+            eye = self.pos
+            for zt in (z1 - 0.1, z0 + 0.6 * (z1 - z0)):
+                if not any(segment_hits_box(eye, (bx, by, zt), b) for b in self.cfg.boxes):
+                    return False
+            return True
         return False
 
     # --- range sensors -----------------------------------------------------
@@ -155,6 +174,10 @@ class MockWorld:
             t = -b - math.sqrt(disc)
             if 0 <= t <= self.cfg.range_max and (best is None or t < best):
                 best = t
+        if self.cfg.boxes:
+            t = ray_boxes(self.pos[None, :], np.array([[d[0], d[1], 0.0]]), self.cfg.boxes)[0]
+            if t <= self.cfg.range_max and (best is None or t < best):
+                best = float(t)
         return best
 
     def ranges(self) -> dict:
@@ -195,6 +218,8 @@ class MockWorld:
             tt = np.where(ok, (-b - np.sqrt(np.maximum(disc, 0))) / np.maximum(a, 1e-9), np.inf)
             tt[tt < 0] = np.inf
             t = np.minimum(t, tt)
+        if self.cfg.boxes:
+            t = np.minimum(t, ray_boxes(o[None, :], dirs, self.cfg.boxes))
         for a3, b3, r in self.cfg.branches:
             a3, b3 = np.array(a3, float), np.array(b3, float)
             tr, dist = _ray_segment(o, dirs, a3, b3, max_t)
@@ -288,9 +313,9 @@ class MockWorld:
             if i == 0 and self._target_hidden():
                 continue
             p = self.person_pos(i)
-            if self._blocked_to(p):
-                continue
             (w, d, h), base, _, _ = self._person(i)
+            if self._blocked_to(p, 0.0, base + h):
+                continue
             b = self._box(p, w, d, base, base + h, mount_yaw_deg)
             if b is not None:
                 out.append((i, b, float(np.hypot(*(p[:2] - self.pos[:2])))))
@@ -319,7 +344,7 @@ class MockWorld:
                 if i == 0 and self._target_hidden():
                     continue
                 p = self.person_pos(i)
-                if not self._blocked_to(p):
+                if not self._blocked_to(p, 0.0, self._person(i)[1] + self._person(i)[0][2]):
                     people.append((float(np.hypot(*(p[:2] - self.pos[:2]))), i))
             for _, i in sorted(people, reverse=True):                  # far first
                 self._draw_person(img, i, mount_yaw_deg)
@@ -339,32 +364,39 @@ class MockWorld:
 
     def depth(self, mount_yaw_deg: float = 0.0, w: int = 64, h: int = 48) -> np.ndarray:
         """Ground-truth depth (metres along each pixel ray) at low resolution:
-        ground plane + infinitely tall pillars. inf = sky / nothing in range."""
+        ground plane + infinitely tall pillars + boxes. inf = sky / nothing in range."""
         f = (w / 2) / math.tan(math.radians(self.cfg.hfov_deg) / 2)
         th = math.radians(self.cfg.cam_pitch_deg)
         fwd, right = self._axes(math.radians(mount_yaw_deg))
-        us = (np.arange(w) + 0.5 - w / 2) / f            # x / z in camera
-        vs = (np.arange(h) + 0.5 - h / 2) / f            # y(down) / z
-        out = np.full((h, w), np.inf, np.float32)
+        u = (np.arange(w) + 0.5 - w / 2) / f             # x / z in camera
+        v = (np.arange(h) + 0.5 - h / 2) / f             # y(down) / z
+        uu, vv = np.meshgrid(u, v)
+        f_b = math.cos(th) - vv * math.sin(th)
+        u_b = -(vv * math.cos(th) + math.sin(th))
+        r_b = uu
+        n = np.sqrt(f_b ** 2 + r_b ** 2 + u_b ** 2)
+        f_b, r_b, u_b = f_b / n, r_b / n, u_b / n
+        dirs = (f_b[..., None] * fwd + r_b[..., None] * right).reshape(-1, 3)
+        dirs[:, 2] = u_b.reshape(-1)
         alt = max(self.pos[2], 1e-3)
-        for j, v in enumerate(vs):
-            for i, u in enumerate(us):
-                # camera ray -> body (forward, right, up), unit length
-                f_b = math.cos(th) - v * math.sin(th)
-                u_b = -(v * math.cos(th) + math.sin(th))
-                r_b = u
-                n = math.sqrt(f_b * f_b + r_b * r_b + u_b * u_b)
-                f_b, r_b, u_b = f_b / n, r_b / n, u_b / n
-                best = alt / -u_b if u_b < -1e-6 else np.inf          # ground
-                hlen = math.hypot(f_b, r_b)
-                if hlen > 1e-6:
-                    d2 = (fwd * f_b + right * r_b) / hlen                # horizontal direction
-                    hit = self._ray(d2)
-                    if hit is not None:
-                        best = min(best, hit / hlen)
-                if best <= self.cfg.range_max * 1.5:
-                    out[j, i] = best
-        return out
+        dz = dirs[:, 2]
+        best = np.where(dz < -1e-6, alt / np.where(dz < -1e-6, -dz, 1.0), np.inf)   # ground
+        o = self.pos
+        for ox, oy, r in self.cfg.obstacles:                   # pillars, infinitely tall
+            fx, fy = o[0] - ox, o[1] - oy
+            a = dirs[:, 0] ** 2 + dirs[:, 1] ** 2
+            b = fx * dirs[:, 0] + fy * dirs[:, 1]
+            c = fx * fx + fy * fy - r * r
+            disc = b * b - a * c
+            ok = (disc >= 0) & (a > 1e-9)
+            tt = np.where(ok, (-b - np.sqrt(np.maximum(disc, 0))) / np.maximum(a, 1e-9), np.inf)
+            # the old per-pixel version only counted hits within range_max horizontally
+            tt[(tt < 0) | (tt * np.sqrt(a) > self.cfg.range_max)] = np.inf
+            best = np.minimum(best, tt)
+        if self.cfg.boxes:
+            best = np.minimum(best, ray_boxes(o[None, :], dirs, self.cfg.boxes))
+        best[best > self.cfg.range_max * 1.5] = np.inf
+        return best.reshape(h, w).astype(np.float32)
 
     def telemetry(self) -> Telemetry:
         fwd, right = self._axes()
@@ -382,6 +414,53 @@ class MockWorld:
     def distance_to_target(self) -> float:
         d = self.target_pos() - self.pos
         return float(math.hypot(d[0], d[1]))
+
+
+# --- boxes (walls, buildings) ---------------------------------------------------
+def inside_box(x: float, y: float, boxes, margin: float = 0.0) -> Optional[int]:
+    """Index of the box whose footprint contains (x, y), else None."""
+    for i, (x0, y0, x1, y1, _h) in enumerate(boxes):
+        if min(x0, x1) - margin <= x <= max(x0, x1) + margin and min(y0, y1) - margin <= y <= max(y0, y1) + margin:
+            return i
+    return None
+
+
+def ray_boxes(o: np.ndarray, d: np.ndarray, boxes) -> np.ndarray:
+    """Distance along rays o + t d (o: (1, 3) or (n, 3), d: (n, 3)) to the first
+    box surface (slab test), inf = no hit. Boxes stand on the ground (z 0..h)."""
+    o = np.broadcast_to(o, d.shape)
+    best = np.full(len(d), np.inf)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        inv = 1.0 / np.where(np.abs(d) < 1e-12, 1e-12, d)
+        for x0, y0, x1, y1, hgt in boxes:
+            lo = np.array([min(x0, x1), min(y0, y1), 0.0])
+            hi = np.array([max(x0, x1), max(y0, y1), hgt])
+            t1, t2 = (lo - o) * inv, (hi - o) * inv
+            tmin = np.minimum(t1, t2).max(axis=1)
+            tmax = np.maximum(t1, t2).min(axis=1)
+            hit = (tmax >= np.maximum(tmin, 0.0))
+            t = np.where(hit, np.maximum(tmin, 0.0), np.inf)
+            best = np.minimum(best, t)
+    return best
+
+
+def segment_hits_box(a, b, box) -> bool:
+    """3-D segment a -> b passes through the box."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    d = b - a
+    L = float(np.linalg.norm(d))
+    if L < 1e-9:
+        return False
+    t = ray_boxes(a[None, :], (d / L)[None, :], (box,))[0]
+    return bool(t < L)
+
+
+def point_box_dist(p, box) -> float:
+    x0, y0, x1, y1, hgt = box
+    lo = np.array([min(x0, x1), min(y0, y1), 0.0])
+    hi = np.array([max(x0, x1), max(y0, y1), hgt])
+    q = np.maximum(lo - p, 0.0) + np.maximum(p - hi, 0.0)
+    return float(np.linalg.norm(q))
 
 
 # --- port adapters over the mock world ----------------------------------------

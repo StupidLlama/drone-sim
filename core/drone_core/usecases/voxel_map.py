@@ -205,6 +205,15 @@ class VoxelMap:
                 continue
             rays = camera_rays(cam, *depth.shape)
             ok = np.isfinite(depth) & (depth > 0.2) & (depth < c.depth_max_range)
+            far = ~np.isnan(depth) & (depth >= c.depth_max_range)
+            if far.any():
+                # Nothing within range along these rays (sky, or past the top of a
+                # wall): the space they cross is free. Without this the air above a
+                # low wall is never mapped, and nothing can tell it may be seen over.
+                fr = np.linspace(0.0, 1.0, c.depth_free_samples + 2)[1:-1]
+                dirs = body_to_world(rays[far], telem.yaw)
+                seg = o + dirs[:, None, :] * (fr * c.depth_max_range)[None, :, None]
+                frees.append(self._flat(seg.reshape(-1, 3)))
             if not ok.any():
                 continue
             d = depth[ok][:, None]
@@ -275,6 +284,136 @@ class VoxelMap:
         iz = np.floor((pts[:, 2] - c.z_min) / c.resolution).astype(int)
         ok = (ix >= 0) & (ix < self.nxy) & (iy >= 0) & (iy < self.nxy) & (iz >= 0) & (iz < self.nz)
         return bool((self.logodds[iz[ok], iy[ok], ix[ok]] > c.occupied_at).any())
+
+    # --- queries for the target belief / viewpoint search (v2) ---------------
+    def _cols(self, x, y):
+        c = self.cfg
+        ix = np.floor((np.asarray(x, float) - self.origin[0]) / c.resolution).astype(int)
+        iy = np.floor((np.asarray(y, float) - self.origin[1]) / c.resolution).astype(int)
+        ok = (ix >= 0) & (ix < self.nxy) & (iy >= 0) & (iy < self.nxy)
+        return ix, iy, ok
+
+    def _column_tops(self) -> np.ndarray:
+        """[y, x] world height of the top of the highest occupied voxel in each
+        column, -inf where nothing is known to be occupied. Cached per update."""
+        key = (self._updates, None if self.origin is None else tuple(self.origin))
+        if getattr(self, "_tops_key", None) != key:
+            occ = self.occupied()
+            any_ = occ.any(axis=0)
+            top_iz = self.nz - 1 - np.argmax(occ[::-1], axis=0)
+            tops = self.cfg.z_min + (top_iz + 1) * self.cfg.resolution
+            self._tops = np.where(any_, tops, -np.inf)
+            self._tops_key = key
+        return self._tops
+
+    def height_at(self, x: float, y: float) -> Optional[float]:
+        """Height (m) of the top of the highest obstacle mapped at ground point
+        (x, y), None if nothing is mapped there (or it is outside the map).
+        Tells the search whether a wall can be seen over and how high to climb."""
+        if self.origin is None:
+            return None
+        ix, iy, ok = self._cols(x, y)
+        if not ok:
+            return None
+        h = float(self._column_tops()[iy, ix])
+        return None if not math.isfinite(h) else h
+
+    def top_between(self, a, b, skip_start: float = 0.3, skip_end: float = 0.3, with_dist: bool = False):
+        """Highest mapped obstacle top (m) on the ground line a -> b (x, y), and
+        None if the line is clear of mapped obstacles. The ends are skipped
+        (the drone, the person). with_dist=True returns (height, distance from a)."""
+        if with_dist:
+            return self._top_between(a, b, skip_start, skip_end)
+        r = self._top_between(a, b, skip_start, skip_end)
+        return None if r is None else r[0]
+
+    def _top_between(self, a, b, skip_start, skip_end):
+        if self.origin is None:
+            return None
+        a, b = np.asarray(a[:2], float), np.asarray(b[:2], float)
+        L = float(np.linalg.norm(b - a))
+        if L <= skip_start + skip_end:
+            return None
+        s = np.arange(skip_start, L - skip_end, self.cfg.resolution * 0.5)
+        pts = a + (b - a)[None, :] * (s / L)[:, None]
+        ix, iy, ok = self._cols(pts[:, 0], pts[:, 1])
+        if not ok.any():
+            return None
+        hs = self._column_tops()[iy[ok], ix[ok]]
+        k = int(np.argmax(hs))
+        if not math.isfinite(hs[k]):
+            return None
+        return float(hs[k]), float(s[ok][k])
+
+    def occupied_above(self, x: float, y: float, z0: float, z1: float) -> bool:
+        """Anything mapped in the column at (x, y) between heights z0 and z1
+        (an overhang, a canopy)? Used before climbing."""
+        if self.origin is None:
+            return False
+        ix, iy, ok = self._cols(x, y)
+        if not ok:
+            return False
+        c = self.cfg
+        k0 = max(0, int(math.floor((z0 - c.z_min) / c.resolution)))
+        k1 = min(self.nz, int(math.ceil((z1 - c.z_min) / c.resolution)))
+        return bool((self.logodds[k0:k1, iy, ix] > c.occupied_at).any())
+
+    def free_above(self, x: float, y: float, z: float, dz: float = 0.6) -> bool:
+        """Has the map seen open air just above height z at (x, y)? (Then a
+        top found there is the real top, not just as high as we looked.)"""
+        if self.origin is None:
+            return False
+        ix, iy, ok = self._cols(x, y)
+        if not ok:
+            return False
+        c = self.cfg
+        k0 = max(0, int(math.floor((z + 0.05 - c.z_min) / c.resolution)))
+        k1 = min(self.nz, int(math.ceil((z + dz - c.z_min) / c.resolution)))
+        if k1 <= k0:
+            return False
+        # a 3x3 neighbourhood: the column right above the top is easily missed by sparse rays
+        col = self.logodds[k0:k1, max(0, iy - 1):iy + 2, max(0, ix - 1):ix + 2]
+        return bool((col < -0.1).any(axis=(1, 2)).all() and not (col > c.occupied_at).any())
+
+    def obstacle_mask(self, z0: float = 0.3, z1: float = 1.8):
+        """2-D [y, x] mask of columns blocked at person height, plus the map
+        origin and resolution: where a walking person cannot go."""
+        if self.origin is None:
+            return None
+        c = self.cfg
+        k0 = max(0, int(math.floor((z0 - c.z_min) / c.resolution)))
+        k1 = min(self.nz, int(math.ceil((z1 - c.z_min) / c.resolution)))
+        return (self.logodds[k0:k1] > c.occupied_at).any(axis=0), self.origin.copy(), c.resolution
+
+    def lines_blocked(self, a, pts, skip_start: float = 0.6, skip_end: float = 0.5,
+                      samples: int = 40):
+        """Vectorised line of sight from one eye point a to many points (n, 3).
+        Returns (blocked, unknown): blocked = an occupied voxel on the line;
+        unknown = fraction of the line through voxels never observed, or
+        outside the map (the camera may not have seen there at all)."""
+        pts = np.asarray(pts, float)
+        n = len(pts)
+        if self.origin is None or n == 0:
+            return np.zeros(n, bool), np.ones(n)
+        a = np.asarray(a, float)
+        d = pts - a
+        L = np.linalg.norm(d, axis=1)
+        f = np.linspace(0.0, 1.0, samples)[None, :]
+        s = skip_start + f * np.maximum(L[:, None] - skip_start - skip_end, 0.0)      # (n, k) distance along
+        q = a + d[:, None, :] * (s / np.maximum(L, 1e-6)[:, None])[..., None]           # (n, k, 3)
+        c = self.cfg
+        ix = np.floor((q[..., 0] - self.origin[0]) / c.resolution).astype(int)
+        iy = np.floor((q[..., 1] - self.origin[1]) / c.resolution).astype(int)
+        iz = np.floor((q[..., 2] - c.z_min) / c.resolution).astype(int)
+        ok = (ix >= 0) & (ix < self.nxy) & (iy >= 0) & (iy < self.nxy) & (iz >= 0) & (iz < self.nz)
+        lo = np.zeros(q.shape[:2], np.float32)
+        lo[ok] = self.logodds[iz[ok], iy[ok], ix[ok]]
+        blocked = (lo > c.occupied_at).any(axis=1)
+        unknown = ((np.abs(lo) < 0.05) | ~ok).mean(axis=1)
+        short = L <= skip_start + skip_end
+        blocked[short] = False
+        unknown[short] = 0.0
+        return blocked, unknown
 
     def ranges(self, telem: Telemetry, max_range: float = 10.0) -> dict:
         """Clearances in the range-sensor key style, plus front_up / front_down /

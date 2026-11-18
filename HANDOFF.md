@@ -3,10 +3,9 @@
 Paste this file (or point the new thread at it) to pick up where the last thread stopped.
 
 ## Where everything is
-- GitHub repo: https://github.com/StupidLlama/drone-sim.git (created by Evan 2026-11-18, may still be empty).
-  First job in a new thread: attach this repo, push the full `/mnt/project-files/drone-sim/` contents
-  (no `__pycache__`, `.pytest_cache`, `*.onnx`; add a `.gitignore` for those plus Unity `Library/`, `Temp/`, `Logs/`),
-  then from then on make the repo the master copy and have Evan `git pull` instead of file copying.
+- GitHub repo: https://github.com/StupidLlama/drone-sim (master copy since 2026-11-18; v1 on `main`,
+  v2 on branch `v2-lost-target-estimation` / its PR). Work on a branch, open a PR, then also copy to the
+  cloud project files and Evan's PC folders until Evan switches to `git pull`.
 - Master copy (cloud project files): `/mnt/project-files/drone-sim/` and `/mnt/project-files/drone-sim.zip`
 - Evan's PC:
   - Python: `C:\Users\user\Downloads\drone-sim\drone-python\` (core in `core\`)
@@ -21,7 +20,15 @@ Paste this file (or point the new thread at it) to pick up where the last thread
 - Keys in Unity: V ghost target, X 3D map, B battery, Q/E or right-drag chase camera.
 - Keys in Python HUD: `[` `]` rotate the 3D map panel.
 
-## Current state: v1 (benchmark score 92.7, baseline v0 79.6)
+## Current state: v2 (suite 1 score 92.7, occlusion suite 2: v1 59.2 -> v2 82.2)
+v2 (2026-11-18): `usecases/target_belief.py` particle filter (walk/turn/stop/inside, map walls,
+negative information), `usecases/viewpoints.py` viewpoint search (with the map), belief re-lock gate,
+`VoxelMap.height_at / top_between / free_above / occupied_above / lines_blocked / obstacle_mask`,
+mock `boxes` (walls/buildings), benchmark suite 2 (6 scenarios x 2 variants, `--suite`, `--legacy`, `--jobs`),
+Unity faded extra ghosts (`est.modes`). 55 tests + 1 skip (~10 min). Unity C# for v2 not compiled.
+Without a map (`--no-map`, real mode) the flight is still v1; the belief only drives ghost + gate.
+
+### v1 notes
 - Fly-over fix: ground range from altitude + box edge angle, min separation brake/backoff (`--distance`, `--target-height`).
 - Appearance re-ID memory (`--reid auto|off|color|net`), BoT-SORT re-ID tracker config, id-swap check.
 - Ghost target in Unity showing where the core thinks the lost target is.
@@ -36,19 +43,11 @@ Paste this file (or point the new thread at it) to pick up where the last thread
 3. Keep the Python protocol (`adapters/unity/protocol.py`) and C# (`PythonBridge.cs`) in sync.
 4. New features go in `usecases/` and depend only on `ports/`; `main.py` is the only place things are wired together.
 
-## Next job: v2 = better lost-target estimation
-Read first: `research/Drone v2 lost target estimation.md` (ranked 11-item to-do list, new scenarios, sources).
-Problem: the ghost keeps walking at full speed and overshoots (about 9.6 m off in `decoy_at_exit`, re-lock gate is 8 m).
-Plan in short:
-1. Add real walls/corners to the mock world (needed to test anything below).
-2. Replace the constant-velocity guess with a particle filter: walk / turn / stop / hidden modes, map-constrained.
-3. Negative information: remove particles in areas the cameras saw empty.
-4. Fly to the viewpoint that sees the most remaining probability, not to one point.
-5. Obstacle-height query (Evan approved for v2): `VoxelMap.height_at(x, y)` / `top_between(a, b)` returning the
-   highest occupied voxel, so the viewpoint search knows if it can see over a wall and how high to climb
-   (respect the 10 m ceiling and the <1 m overhead rule). Unit test with a known wall in the mock world.
-6. New benchmark scenarios (corner turn, stops behind wall, doubles back, low wall to see over).
-
-Keep v2 to estimation only, so the benchmark shows what helped.
-Later: v3 world-frame follow controller with velocity feed-forward (reuse the v2 world estimate);
-v3+ orbit/spiral mapping while following (needs v2 recovery first); wall-penetrating radar (hardware, later).
+## Next job: v3
+- World-frame follow controller with velocity feed-forward (reuse the v2 belief/world estimate).
+- Then orbit/spiral mapping while following; wall-penetrating radar later (hardware).
+- Open v2 items (from the research to-do): goal hints (doors/exits), give-up rule from visible-reachable
+  mass instead of timers, simulated UWB/GPS tag, speed-ups if tick p95 grows (enters_building p95 71 ms),
+  side/back cameras in suite 2 (it is front-camera only), ghost in suite-1 pillar_occlusion got worse
+  without a map (0.79 -> 4.19 m: the "stopped" guess becomes the heaviest).
+- Benchmark: `python tools/benchmark.py --version v3 --suite all --notes "..."`, compare with v2.
