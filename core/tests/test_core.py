@@ -841,3 +841,116 @@ def test_v2_finds_person_after_hidden_u_turn():
     assert r["wrong_pct"] == 0.0 and r["relock_s"] is not None and r["relock_s"] != "never"
     assert r["relock_s"] < 8.0 and r["on_target_pct"] > 85.0, r
     assert r["clearance_m"] is None or r["clearance_m"] > 0.3
+
+
+# --- v3: what did they vanish behind? + scan routes ---------------------------------
+class _BoxMap:
+    """Stub 3-D map from boxes (x0, y0, x1, y1, h): everything seen (known), 0.2 m cells."""
+    def __init__(self, boxes, origin=(-15.0, -5.0), n=150):
+        self.res, self.org, self.n = 0.2, np.array(origin), n
+        self.boxes = boxes
+        xs = self.org[0] + (np.arange(n) + 0.5) * self.res
+        ys = self.org[1] + (np.arange(n) + 0.5) * self.res
+        X, Y = np.meshgrid(xs, ys)
+        self.top = np.full((n, n), -np.inf)
+        for x0, y0, x1, y1, h in boxes:
+            m = (X >= x0) & (X <= x1) & (Y >= y0) & (Y <= y1)
+            # only the faces are ever seen (like a camera): the inside stays unknown
+            inner = (X > x0 + 0.3) & (X < x1 - 0.3) & (Y > y0 + 0.3) & (Y < y1 - 0.3)
+            self.top[m & ~inner] = h
+            self.inner = getattr(self, "inner", np.zeros((n, n), bool)) | inner
+
+    def obstacle_mask(self, z0=0.3, z1=1.8):
+        return np.isfinite(self.top), self.org.copy(), self.res
+
+    def known_mask(self, z0=0.3, z1=1.8):
+        return ~getattr(self, "inner", np.zeros((self.n, self.n), bool))
+
+    def height_at(self, x, y):
+        ix, iy = int((x - self.org[0]) / self.res), int((y - self.org[1]) / self.res)
+        if not (0 <= ix < self.n and 0 <= iy < self.n):
+            return None
+        h = self.top[iy, ix]
+        return None if not np.isfinite(h) else float(h)
+
+    def free_above(self, x, y, z, dz=0.6):
+        return True
+
+
+def test_obstacle_type_tells_wall_hall_and_room_apart():
+    from drone_core.usecases.obstacle_type import HALL, ROOM, WALL, ObstacleClassifier
+    clf = ObstacleClassifier()
+    # a 12 m wall along y = 13; lost just past its west end, walking north
+    wall = _BoxMap([(0.0, 12.85, 12.0, 13.15, 3.0)])
+    sc = clf.classify(wall, (-0.4, 13.45), (0.0, 1.0), drone_xy=(-0.4, 8.0), belief_xy=(2.0, 13.5))
+    assert sc.kind == WALL and sc.cert >= 0.8, sc
+    assert sc.hidden[1] > 0.9                    # they're on the far (north) side of it
+    assert abs(sc.end[0]) < 0.6 and sc.out[0] < -0.9  # its end is the west one
+    # two walls 3 m apart: lost at the mouth of the hall
+    hall = _BoxMap([(2.0, 11.85, 16.0, 12.15, 3.5), (2.0, 14.85, 16.0, 15.15, 3.5)])
+    sc = clf.classify(hall, (2.5, 13.5), (1.0, 0.0), drone_xy=(-0.5, 9.0))
+    assert sc.kind == HALL and sc.cert >= 0.8, sc
+    assert sc.axis[0] > 0.9 and abs(sc.centre[1] - 13.5) < 0.4 and 2.4 < sc.width < 3.6
+    # walked straight into a 10 x 6 m shop
+    shop = _BoxMap([(2.0, 14.0, 12.0, 20.0, 3.5)])
+    sc = clf.classify(shop, (4.0, 13.4), (0.0, 1.0), inside_share=0.6, drone_xy=(1.0, 10.0))
+    assert sc.kind == ROOM and sc.cert >= 0.8, sc
+    # nothing near: no scene, no route
+    sc = clf.classify(_BoxMap([]), (0.0, 10.0), (0.0, 1.0))
+    assert sc.kind is None and sc.cert == 0.0
+
+
+def test_scan_routes_follow_the_scene():
+    from drone_core.usecases.obstacle_type import ObstacleClassifier
+    from drone_core.usecases.scan_routes import RouteRunner, build_route
+    clf = ObstacleClassifier()
+    sc = clf.classify(_BoxMap([(0.0, 12.85, 12.0, 13.15, 9.0)]), (-0.4, 13.45), (0.0, 1.0),
+                      drone_xy=(-0.4, 8.0), belief_xy=(2.0, 13.5))
+    sc.low = False
+    r = build_route(sc, 4.0)
+    assert r[0].x < -2.0                                         # swing wide past the end first
+    assert all(w.y > 13.5 for w in r[1:])                         # then along the hidden (north) side
+    assert [w.x for w in r[2:]] == sorted(w.x for w in r[2:])     # walking away from the end
+    assert all(1.5 <= w.z <= 10.0 for w in r)
+    # low wall: one look over it from our side first, under the 10 m ceiling
+    sc.low, sc.top = True, 2.2
+    r2 = build_route(sc, 4.0)
+    assert r2[0].label == "over" and r2[0].y < 13.0 and 4.0 <= r2[0].z <= 10.0
+    # hall: down the centre line, away from the mouth
+    sc = clf.classify(_BoxMap([(2.0, 11.85, 16.0, 12.15, 3.5), (2.0, 14.85, 16.0, 15.15, 3.5)]),
+                      (2.5, 13.5), (1.0, 0.0))
+    r = build_route(sc, 4.0)
+    assert len(r) >= 3 and all(abs(w.y - 13.5) < 0.5 for w in r) and r[-1].x > r[0].x + 6
+    # room: watch the door, look down both sides, then the runner loops back to the door
+    sc = clf.classify(_BoxMap([(2.0, 14.0, 12.0, 20.0, 3.5)]), (4.0, 13.4), (0.0, 1.0), inside_share=0.6)
+    r = build_route(sc, 4.0)
+    assert r[0].label == "door" and r[0].dwell > 0 and {w.label for w in r[1:]} == {"side"}
+    run = RouteRunner()
+    run.start(r, loop=True)
+    t = 0.0
+    for w in r:
+        while run.current((w.x, w.y, w.z), t) is w:
+            t += 0.1
+    assert run.i == 0 and not run.done                            # back to watching the door
+
+
+def test_people_are_cut_out_of_depth_before_mapping():
+    from drone_core.domain.models import Frame, MultiFrame
+    f = Frame(np.zeros((100, 200, 3), np.uint8), 0.0, 1)
+    depth = np.full((50, 100), 4.0, np.float32)
+    m = FollowMission.__new__(FollowMission)
+    multi = MultiFrame({"front": f}, 0.0, 1, depth={"front": depth})
+    person = Track(1, BoundingBox(80, 20, 120, 90), "person", 0.9)
+    out = m._cut_people(multi, {"front": [person]})["front"]
+    assert np.isnan(out[15, 50]) and out[2, 5] == 4.0 and not np.isnan(depth).any()   # input untouched
+
+
+def test_command_carries_scan_route():
+    import json
+    from drone_core.adapters.unity import protocol
+    est = {"x": 1.0, "y": 2.0, "state": "SEARCHING",
+           "route": {"kind": "wall", "cert": 0.874, "active": 1, "i": 1, "pts": [[0.0, 1.0, 4.0], [2.0, 3.0, 4.5]]}}
+    body = json.loads(protocol.encode_command(VelocityCommand(), est)[5:])
+    r = body["est"]["route"]
+    assert r["kind"] == "wall" and r["cert"] == 0.87 and r["i"] == 1 and r["active"] == 1
+    assert r["pts"][1] == {"x": 2.0, "y": 3.0, "z": 4.5}

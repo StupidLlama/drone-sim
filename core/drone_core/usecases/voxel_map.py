@@ -385,6 +385,16 @@ class VoxelMap:
         k1 = min(self.nz, int(math.ceil((z1 - c.z_min) / c.resolution)))
         return (self.logodds[k0:k1] > c.occupied_at).any(axis=0), self.origin.copy(), c.resolution
 
+    def known_mask(self, z0: float = 0.3, z1: float = 1.8):
+        """2-D [y, x] mask of columns the sensors have seen at person height
+        (free or occupied). Same grid as obstacle_mask."""
+        if self.origin is None:
+            return None
+        c = self.cfg
+        k0 = max(0, int(math.floor((z0 - c.z_min) / c.resolution)))
+        k1 = min(self.nz, int(math.ceil((z1 - c.z_min) / c.resolution)))
+        return (np.abs(self.logodds[k0:k1]) > 0.1).any(axis=0)
+
     def lines_blocked(self, a, pts, skip_start: float = 0.6, skip_end: float = 0.5,
                       samples: int = 40):
         """Vectorised line of sight from one eye point a to many points (n, 3).

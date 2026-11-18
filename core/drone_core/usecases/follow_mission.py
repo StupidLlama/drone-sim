@@ -101,7 +101,7 @@ class FollowMission:
             else:
                 other[name] = found
         if (self.surround_map is not None or self.voxel_map is not None) and telem is not None:
-            telem = self._update_map(multi, telem)
+            telem = self._update_map(multi, telem, {"front": tracks, **other})
         if getattr(self.follow, "appearance", None) is not None:
             self.follow.observe_appearance(frame.image, tracks, frame.width, frame.height, now, telem)
         status = self.follow.step(tracks, frame.width, frame.height, now, telem, other)
@@ -125,11 +125,13 @@ class FollowMission:
             self.on_tick(result)
         return result
 
-    def _update_map(self, multi: MultiFrame, telem: Telemetry) -> Telemetry:
+    def _update_map(self, multi: MultiFrame, telem: Telemetry, tracks_by_cam: Optional[dict] = None) -> Telemetry:
         self._ticks += 1
         if not multi.depth and self.depth_estimator is not None and self._ticks % self.depth_every == 0:
             depth = {n: self.depth_estimator.estimate(f) for n, f in multi.frames.items()}
             multi = dataclasses.replace(multi, depth=depth)
+        if multi.depth and tracks_by_cam:
+            multi = dataclasses.replace(multi, depth=self._cut_people(multi, tracks_by_cam))
         ranges = dict(telem.ranges)
         maps = []
         if self.surround_map is not None:
@@ -142,6 +144,31 @@ class FollowMission:
             for k, v in m.ranges(telem).items():
                 ranges[k] = min(v, ranges.get(k, float("inf")))
         return dataclasses.replace(telem, ranges=ranges)
+
+    people_pad: float = 0.15    # grow each person box by this fraction before cutting it out
+
+    def _cut_people(self, multi: MultiFrame, tracks_by_cam: dict) -> dict:
+        """Depth pixels inside a detected person's box are that person, not a
+        wall: blank them (NaN) so people are never painted into the 3-D map. A
+        person standing still for minutes used to build up into an 'obstacle'
+        that then blocked the drone's own line of sight to them."""
+        out = {}
+        for name, d in multi.depth.items():
+            trs = [t for t in tracks_by_cam.get(name, ()) if t.class_name == "person"]
+            f = multi.frames.get(name)
+            if not trs or f is None:
+                out[name] = d
+                continue
+            d = np.array(d, dtype=np.float32, copy=True)
+            sy, sx = d.shape[0] / f.height, d.shape[1] / f.width
+            for t in trs:
+                b = t.box
+                px, py = self.people_pad * b.w, self.people_pad * b.h
+                x0 = max(0, int((b.x1 - px) * sx)); x1 = min(d.shape[1], int(np.ceil((b.x2 + px) * sx)))
+                y0 = max(0, int((b.y1 - py) * sy)); y1 = min(d.shape[0], int(np.ceil((b.y2 + py) * sy)))
+                d[y0:y1, x0:x1] = np.nan
+            out[name] = d
+        return out
 
     def _read(self) -> Optional[MultiFrame]:
         if hasattr(self.camera, "read_all"):
