@@ -954,3 +954,25 @@ def test_command_carries_scan_route():
     r = body["est"]["route"]
     assert r["kind"] == "wall" and r["cert"] == 0.87 and r["i"] == 1 and r["active"] == 1
     assert r["pts"][1] == {"x": 2.0, "y": 3.0, "z": 4.5}
+
+
+# --- v4: see the turn coming -----------------------------------------------------------
+def test_turn_anticipation_closes_in_and_swings_to_the_outside():
+    from drone_core.usecases.turn_anticipation import TurnAnticipator
+    a = TurnAnticipator()
+    # walking north up the west face of a building that ends at y = 20: corner ahead, to the right
+    bld = _BoxMap([(0.0, 12.0, 8.0, 20.0, 4.0)], origin=(-10.0, 5.0))
+    adv = a.advise(0.0, (-0.4, 18.0), (0.0, 1.4), bld)
+    assert adv is not None and adv.reason == "corner ahead" and adv.turn == 1
+    assert adv.dist_scale < 1.0 and adv.side[0] < -0.9           # move to the outside: west
+    vx, vy = a.side_speed(adv, (-0.4, 18.0), (-0.4, 12.0))        # drone right behind them
+    assert vx < 0 and abs(vy) < 1e-6
+    # walking east at a wall with open space to the south only: they'll turn right; go left (north)
+    a.reset()
+    wall = _BoxMap([(5.0, 0.0, 5.3, 20.0, 3.0), (-5.0, 11.0, 5.0, 11.3, 3.0)], origin=(-10.0, -5.0))
+    adv = a.advise(0.0, (2.5, 9.5), (1.4, 0.0), wall)
+    assert adv is not None and adv.reason == "wall ahead" and adv.turn == 1 and adv.side[1] > 0.9
+    # open ground, or standing still: no advice (after the hold time)
+    a.reset()
+    assert a.advise(0.0, (-5.0, 0.0), (0.0, 1.4), _BoxMap([])) is None
+    assert a.advise(0.0, (-0.4, 18.0), (0.0, 0.1), bld) is None

@@ -17,6 +17,7 @@ from drone_core.usecases.target_belief import BeliefConfig, TargetBelief
 from drone_core.usecases.viewpoints import ViewpointConfig, ViewpointPlanner
 from drone_core.usecases.obstacle_type import ObstacleClassifier, Scene, SceneConfig
 from drone_core.usecases.scan_routes import RouteConfig, RouteRunner, build_route
+from drone_core.usecases.turn_anticipation import AnticipateConfig, TurnAnticipator
 
 
 @dataclass
@@ -94,6 +95,10 @@ class FollowConfig:
     scenes: SceneConfig = field(default_factory=SceneConfig)
     routes: RouteConfig = field(default_factory=RouteConfig)
     route_bias: float = 2.0             # the v2 search overrules the route only when this much better
+    room_gate_m: float = 4.0            # room route: re-lock on anyone this close to the building's mapped box
+    # v4: see a turn coming while following (wall or corner ahead of them on the
+    # map): close in and move to the outside of the turn. Needs the map.
+    anticipate: AnticipateConfig = field(default_factory=AnticipateConfig)
 
 
     @property
@@ -142,6 +147,8 @@ class FollowTarget:
         self.planner = ViewpointPlanner(self.cfg.viewpoints)
         self._cams_seen = {"front"}
         self._people_xy: list = []                  # ground (x, y) of everyone detected this frame
+        self.anticipator = TurnAnticipator(self.cfg.anticipate)
+        self.advice = None                          # v4: latest turn advice while following
         # v3: scene classifier + scan route
         self.classifier = ObstacleClassifier(self.cfg.scenes)
         self.runner = RouteRunner()
@@ -170,6 +177,7 @@ class FollowTarget:
         self.belief.reset()
         self.planner.reset()
         self._clear_scene()
+        self.anticipator.reset()
 
     def step(self, tracks: list[Track], frame_w: int, frame_h: int, t: float,
              telem: Optional[Telemetry] = None,
@@ -226,6 +234,16 @@ class FollowTarget:
                 if target is not None:
                     cut = ground_range(target.box, frame_w, frame_h, telem, c.camera)[1]
                 want = self.follow_distance(frame_w, frame_h)
+                self.advice = None
+                if self.obstacle_map is not None and self.world.pos is not None:
+                    self.advice = self.anticipator.advise(t, self.world.pos, self.world.vel, self.obstacle_map)
+                    toward_us = telem is not None and (
+                        self.world.vel[0] * (telem.position[0] - self.world.pos[0])
+                        + self.world.vel[1] * (telem.position[1] - self.world.pos[1]) > 0)
+                    if self.advice is not None and not toward_us:
+                        # a turn is coming: close in (never under min_close_m, never
+                        # when they're walking back at us)
+                        want = max(min(want, c.anticipate.min_close_m), want * self.advice.dist_scale)
                 ed = math.log(max(gdist, 0.1) / want)
                 if cut:
                     ed = min(ed, 0.0)    # box cut off by the frame edge: we're close, never close in
@@ -242,6 +260,12 @@ class FollowTarget:
             yaw_rate=c.yaw.update(ex, dt),
         )
         errors = {"ex": ex, "ey": ey, "ed": ed}
+        if self.advice is not None and telem is not None and self.world.pos is not None:
+            # ...and move to the outside of the turn: from there the view wraps round the corner
+            vx, vy = self.anticipator.side_speed(self.advice, self.world.pos, telem.position)
+            cmd = VelocityCommand(cmd.forward, cmd.right + vx * math.cos(telem.yaw) - vy * math.sin(telem.yaw),
+                                  cmd.up, cmd.yaw_rate)
+            errors["turn"] = f"{self.advice.reason} ({'right' if self.advice.turn > 0 else 'left'})"
         if self.appearance is not None and self.appearance.last_score is not None:
             errors["look"] = round(self.appearance.last_score, 2)
         if gdist is not None:
@@ -449,6 +473,14 @@ class FollowTarget:
             else:
                 d = gate_m * (1.0 + math.log(c.belief_gate_mass / max(dens, 1e-9)) / math.log(10.0))
             near = min((math.hypot(p[0] - k.x, p[1] - k.y) - (1.0 + k.spread) for k in cl), default=1e9)
+            if self.route_kind == "room" and self.scene is not None and self.scene.box is not None:
+                # v3: they went into a building; another door is as likely as the
+                # one they used, and the belief only knows that one. Accept
+                # someone right by the building (the side looks are for this).
+                x0, y0, x1, y1 = self.scene.box
+                m = c.room_gate_m
+                if x0 - m <= p[0] <= x1 + m and y0 - m <= p[1] <= y1 + m:
+                    near = min(near, 0.0)
             return max(0.0, min(d, near))
         return gate
 
