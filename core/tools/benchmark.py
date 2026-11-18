@@ -44,7 +44,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Optional
 
-import numpy as np
+# One BLAS thread per process. With --jobs every worker would otherwise reserve
+# buffers for one thread per CPU core, and on Windows OpenBLAS runs out of memory
+# ("OpenBLAS error: Memory allocation still failed"). Must be set before numpy loads.
+for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
+import numpy as np  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
