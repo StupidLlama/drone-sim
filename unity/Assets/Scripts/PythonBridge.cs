@@ -3,7 +3,8 @@
 //   every message: uint32 BE length(type+payload) | uint8 type | payload
 //   Unity->Py  FRAME(1):   uint32 BE header_len | header JSON | JPEG per camera | depth per camera
 //   Py->Unity  COMMAND(2): JSON {forward,right,up (m/s), yaw_rate (rad/s, + = right),
-//                               optional est:{has,x,y,h,r,state} = where Python thinks the target is}
+//                               optional est:{has,x,y,h,r,state} = where Python thinks the target is,
+//                               est.modes:[{x,y,w}] = v2 top guesses while hidden}
 //              RESET(5):   empty
 //              MAP(6):     uint32 LE n | float32 LE voxel size | n x int16 LE (x,y,z cm, core frame) -> MapView
 using System;
@@ -30,7 +31,8 @@ public class PythonBridge : MonoBehaviour
     public bool ConsumeResetRequest() => Interlocked.Exchange(ref _resetRequested, 0) == 1;
 
 #pragma warning disable 0649 // assigned by JsonUtility
-    [Serializable] class EstMsg { public int has; public float x, y, h, r; public string state; }
+    [Serializable] class ModeMsg { public float x, y, w; }
+    [Serializable] class EstMsg { public int has; public float x, y, h, r; public string state; public ModeMsg[] modes; }
     [Serializable] class CommandMsg { public float forward, right, up, yaw_rate; public EstMsg est; }
 #pragma warning restore 0649
 
@@ -48,6 +50,7 @@ public class PythonBridge : MonoBehaviour
     Vector4 _est;                 // x, y (= Unity x, z), h, r of where Python thinks the target is
     string _estState = "";
     double _estTime = -1;
+    Vector3[] _modes = new Vector3[0];   // v2: other guesses (x, y = Unity x, z; z = weight), heaviest first
     readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     // Capacity 2: if Python is slow we drop frames instead of building latency.
     BlockingCollection<byte[]> _sendQueue = new BlockingCollection<byte[]>(2);
@@ -79,6 +82,12 @@ public class PythonBridge : MonoBehaviour
     public byte[] TakeMap() => Interlocked.Exchange(ref _map, null);
 
     /// <summary>Where Python thinks the target is (for GhostTarget). False if it sent none recently.</summary>
+    /// <summary>v2: the belief's top guesses while the target is hidden (x, y, weight), heaviest first. Empty otherwise.</summary>
+    public Vector3[] GetEstimateModes()
+    {
+        lock (_cmdLock) return _modes;
+    }
+
     public bool TryGetEstimate(out Vector4 est, out string state)
     {
         lock (_cmdLock)
@@ -159,6 +168,10 @@ public class PythonBridge : MonoBehaviour
                         _est = new Vector4(m.est.x, m.est.y, m.est.h, m.est.r);
                         _estState = m.est.state ?? "";
                         _estTime = _cmdTime;
+                        var n = m.est.modes == null ? 0 : m.est.modes.Length;
+                        var modes = new Vector3[n];
+                        for (int i = 0; i < n; i++) modes[i] = new Vector3(m.est.modes[i].x, m.est.modes[i].y, m.est.modes[i].w);
+                        _modes = modes;
                     }
                 }
             }

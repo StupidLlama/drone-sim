@@ -14,6 +14,10 @@ public class GhostTarget : MonoBehaviour
 
     Transform _body;
     Renderer[] _renderers;
+    // v2: fainter ghosts for the 2nd and 3rd guess of the belief (e.g. "stopped
+    // behind the wall" vs "walked on"), faded by how likely they are.
+    Transform[] _alts = new Transform[2];
+    Material[] _altMats = new Material[2];
     LineRenderer _ring;
     Material _mat;
     Vector3 _shown;
@@ -30,6 +34,24 @@ public class GhostTarget : MonoBehaviour
         var torso = Part(PrimitiveType.Capsule, new Vector3(0, 0.9f, 0), new Vector3(0.55f, 0.9f, 0.55f));
         var head = Part(PrimitiveType.Sphere, new Vector3(0, 1.95f, 0), Vector3.one * 0.3f);
         _renderers = new[] { torso, head };
+
+        for (int i = 0; i < _alts.Length; i++)
+        {
+            _altMats[i] = new Material(shader);
+            var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            var col = go.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+            go.name = "GhostAlt" + (i + 2);
+            go.layer = SonarArray.DebugLayer;
+            go.transform.SetParent(transform, false);
+            go.transform.localScale = new Vector3(0.45f, 0.85f, 0.45f);
+            var r = go.GetComponent<Renderer>();
+            r.sharedMaterial = _altMats[i];
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            go.SetActive(false);
+            _alts[i] = go.transform;
+        }
 
         var ringGo = new GameObject("GhostRing");
         ringGo.transform.SetParent(transform, false);
@@ -80,6 +102,17 @@ public class GhostTarget : MonoBehaviour
         _visible = show && bridge != null && bridge.TryGetEstimate(out var est, out _state);
         _body.gameObject.SetActive(_visible);
         _ring.enabled = _visible;
+        var modes = _visible ? bridge.GetEstimateModes() : null;
+        for (int i = 0; i < _alts.Length; i++)
+        {
+            bool on = modes != null && modes.Length > i + 1 && modes[0].z > 0f;
+            _alts[i].gameObject.SetActive(on);
+            if (!on) continue;
+            var m = modes[i + 1];
+            _alts[i].position = new Vector3(m.x, 0.85f, m.y);
+            var sc = StateColor(_state);
+            _altMats[i].color = new Color(sc.r, sc.g, sc.b, alpha * Mathf.Clamp01(m.z / modes[0].z) * 0.8f);
+        }
         if (!_visible) return;
         bridge.TryGetEstimate(out est, out _state);
         var target = new Vector3(est.x, 0f, est.y);

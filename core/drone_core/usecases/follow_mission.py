@@ -66,6 +66,8 @@ class FollowMission:
         self.voxel_map = voxel_map
         if voxel_map is not None and getattr(follow, "line_of_sight", "x") is None:
             follow.line_of_sight = voxel_map.line_blocked     # climb when the view is blocked
+        if voxel_map is not None and getattr(follow, "obstacle_map", "x") is None:
+            follow.obstacle_map = voxel_map                   # walls + line of sight for the target belief
         self.depth_estimator = depth_estimator    # real drone: depth from images
         self.depth_every = depth_every            # run the (slow) estimator every n frames
         self._ticks = 0

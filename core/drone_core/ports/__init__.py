@@ -73,3 +73,19 @@ class AppearanceEncoder(Protocol):
     Sim: colour histograms. Real: a re-ID network (yolo26n-reid, OSNet)."""
 
     def embed(self, image: np.ndarray, boxes: list[BoundingBox]) -> list[Optional[np.ndarray]]: ...
+
+
+@runtime_checkable
+class ObstacleMap(Protocol):
+    """What the target belief and the viewpoint search ask of a 3-D map
+    (VoxelMap implements it)."""
+
+    def obstacle_mask(self, z0: float, z1: float): ...
+
+    def lines_blocked(self, a, pts): ...
+
+    def height_at(self, x: float, y: float) -> Optional[float]: ...
+
+    def top_between(self, a, b, skip_start: float = 0.3, skip_end: float = 0.3, with_dist: bool = False): ...
+
+    def occupied_above(self, x: float, y: float, z0: float, z1: float) -> bool: ...
