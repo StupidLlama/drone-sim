@@ -90,6 +90,16 @@ class ViewpointPlanner:
         z = (h_wall + c.see_over_margin - c.head_h * f) / (1.0 - f)
         return z if z <= c.max_alt else None
 
+    def score_point(self, drone, x: float, y: float, z: float, face, belief, cams, vmap) -> float:
+        """The same score plan() gives a candidate, for any point (a scan-route
+        waypoint): share of the belief seen from there / (flight time + 2 s)."""
+        c = self.cfg
+        px, py, _ = belief.sample(c.particles, self.rng)
+        face_yaw = math.atan2(face[0] - x, face[1] - y)
+        vis = belief.visible(px, py, (x, y, z), face_yaw, cams, vmap, None, c.unknown_credit)
+        d = math.dist((x, y, z), tuple(drone[:3]))
+        return float(np.mean(vis)) / (d / c.speed + c.time_bias_s)
+
     def plan(self, t: float, drone, yaw: float, base_alt: float, belief, cams, vmap,
              force: bool = False) -> Optional[Viewpoint]:
         c = self.cfg

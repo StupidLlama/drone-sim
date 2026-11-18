@@ -35,6 +35,8 @@ core/
       target_belief.py        v2: particle cloud of where a hidden target is (walk / turn / stop /
                               inside), kept out of walls, emptied where the cameras see nobody
       viewpoints.py           v2: pick the spot that sees the most of that cloud (climbs over low walls)
+      obstacle_type.py        v3: what did they vanish behind? wall / hall / room, with a certainty
+      scan_routes.py          v3: the scan route for each of those (Evan's idea A)
       voxel_map.py            3-D map from sonar + depth; line of sight, obstacle-height queries
       follow_target.py        visual servo: yaw←x offset, climb←y offset, forward←log(box height)
                               + COASTING → REACQUIRING → SEARCHING → IDLE when the target is lost
@@ -119,6 +121,7 @@ python main.py --mode unity --tracker yolo --device 0      # or cpu / mps
 | N | show/hide the sonar beams (yellow = echo, length = range; blue = clear). The drone cameras never see them |
 | V | show/hide the ghost target: where Python thinks the person is (see below) |
 | X | show/hide the 3-D obstacle map Python built (blocks coloured by height) |
+| Z | show/hide the scan route the drone flies while the target is hidden (v3) |
 | R | reset drone and target |
 | F1 | hide help |
 
@@ -132,7 +135,8 @@ which draws every occupied block where it is in the world, coloured by height: b
 the ground, through green and yellow, to red at 6 m and up. That lets you check the map
 against the real scene: blocks should sit on trunks, branches and walls, and nowhere
 else. X toggles it. Like the ghost and the sonar lines, the drone's own cameras don't
-see it. (The same map is also in the Python window's 3D panel.)
+see it. Since v3 the Python window no longer draws it (it cost memory and frame time);
+`main.py --hud-map` brings that panel back.
 
 ### Ghost target: what the drone thinks
 
@@ -217,6 +221,33 @@ times aren't comparable). `--legacy` runs the v1 loss handling for comparison.
    top of isn't "low"). Guesses that went inside count at their door, so the drone ends
    up watching the door. Without a map (`--no-map`, the real drone today) it keeps the
    v1 flight: toward the predicted spot, then circles it 4 m out and 2 m wider every lap.
+   **Scan routes (v3, Evan's idea A).** Twice a second the core also looks at the map
+   round where the person was last seen and decides what they vanished behind
+   (`usecases/obstacle_type.py`): a **wall** (an obstacle on one side, long, open on the
+   other), a **hall** (two walls facing each other, open down the middle) or a **room**
+   (they walked straight into something thick: a shop). It gives each a certainty and,
+   at **80% or more**, flies that scene's route (`usecases/scan_routes.py`), re-checking
+   the whole time and dropping or swapping the route if the map changes its mind:
+   * **wall**: swing wide past the end they went round (the far side of the turn sees the
+     most), look down the hidden side close in first, then fly along it looking further
+     down. A **low wall** (open air seen above it) gets one look over it first, from our
+     side and high enough to see 2 m past it. Straight over the top doesn't help: the
+     cameras only tilt 20° down, so the strip right behind the wall stays hidden without a
+     gimbal.
+   * **hall**: go to its mouth on the centre line and fly down it, looking from where they
+     were last seen to the far end.
+   * **room**: watch the door; then look along the two sides next to it from just past each
+     corner (other doors), back to the door, and round again.
+   The cameras watch the whole way, so the cloud and re-locking keep working during the
+   flight. For walls and halls the viewpoint search can **overrule** the route when it can
+   see at least twice as much of the cloud elsewhere (e.g. they're already walking back
+   out). It never overrules a room's route, because the cloud only knows the door they
+   used and the side looks are there for the doors it doesn't know about. Below 80% the
+   v2 search flies. Unity draws the route (line, ball on the next stop, label like
+   "scanning WALL 87%"; grey "maybe HALL 62%" before it's sure). Z toggles it.
+   People the tracker sees are cut out of the depth before it goes into the map, so
+   someone standing still no longer builds up into an "obstacle" that blocks the view
+   of them (that was one way the drone lost a person who never moved).
 4. **LOITER** (60 s): flies back to where the person was last seen and hovers there.
 5. **GAVE_UP**: forgets the target and the supervisor flies home (**RTH (target lost)**).
    Press `f` to follow again.
@@ -390,13 +421,29 @@ Every message: `uint32 BE length(type+payload) | uint8 type | payload`.
   Header: `frame_id, t, pos [x,y,z] (Unity world), yaw_deg, alt, battery, vel_body [fwd,right,up], ranges {front,back,left,right,front_left,front_right,down}`,
   and optionally `sonar: {fov, min, max, beams: [[yaw_deg, pitch_deg, range], ...]}` (range < 0 = no echo).
 * Python→Unity `COMMAND (2)`: JSON `{forward, right, up}` m/s, `yaw_rate` rad/s, + = turn right,
-  optional `est: {has, x, y, h, r, state, modes: [{x, y, w}]}` for the ghost (`modes`
-  = the top belief guesses while the target is hidden, v2).
+  optional `est: {has, x, y, h, r, state, modes: [{x, y, w}], route: {kind, cert, active, i, pts: [{x, y, z}]}}`
+  for the ghost (`modes` = the top belief guesses while the target is hidden, v2; `route`
+  = the scene it thinks they vanished behind, how sure, and the scan route, `i` = next
+  stop, points in core world metres with z up, v3).
 * Python→Unity `RESET (5)`: empty.
 
 Unity hovers if no command arrives for 0.5 s; Python hovers if frames stop for 0.5 s.
 
 ## What's tested and what isn't
+
+* **v3 scan routes (4 new tests, 59 + 1 skipped in all):** on a stub map the classifier
+  calls a 12 m wall a wall (≥80%, the far side and the right end), two walls 3 m apart a
+  hall (axis and centre line right), walking into a 10 x 6 m shop a room, and an empty
+  area nothing; each scene's route has the right shape (swing wide then along the hidden
+  side, a look over a low wall from our side under the 10 m ceiling, down the hall's
+  centre line, door then both sides then back to the door); people's boxes are blanked in
+  the depth before mapping; and the route goes over the wire to Unity. Benchmark: suite 1
+  92.7 (same), occlusion suite with the new hall scenario 84.1 (v2) -> 83.6 (v3): in the
+  mock the v2 search already finds people fast, so the routes mostly match it, and the
+  room route costs a little when the person comes back out the same door while the drone
+  is checking the sides (decoy_at_exit_geo, 12 s inside: 67.0 -> 63.0% on target).
+  `RouteView.cs` and the `PythonBridge.cs` change weren't compiled here: check the
+  Console after opening Unity.
 
 * **v2 lost-target estimation (6 new tests, 55 + 1 skipped in all):** mock walls and
   shops hide people in 3-D (a 2.2 m wall can be seen over from 7 m, nobody can see into a

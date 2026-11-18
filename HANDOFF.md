@@ -17,15 +17,24 @@ Paste this file (or point the new thread at it) to pick up where the last thread
 - Unity: open the project, press Play (Unity is the TCP server on 127.0.0.1:5555).
 - Python: double-click `run_unity.bat`, or the VS Code run button (rename `vscode` to `.vscode` first).
 - Manual: `cd core` then `python main.py --mode unity --tracker color` (or `--mode mock`).
-- Keys in Unity: V ghost target, X 3D map, B battery, Q/E or right-drag chase camera.
+- Keys in Unity: V ghost target, Z scan route, X 3D map, B battery, Q/E or right-drag chase camera.
 - Keys in Python HUD: `[` `]` rotate the 3D map panel.
 
-## Current state: v2 (suite 1 score 92.7, occlusion suite 2: v1 59.2 -> v2 82.2)
-v2 (2026-11-18): `usecases/target_belief.py` particle filter (walk/turn/stop/inside, map walls,
+## Current state: v3 (suite 1 92.7, occlusion suite 2 with into_hall: v1 64.2, v2 84.1, v3 83.6)
+v3 (2026-11-18, Evan's idea A): `usecases/obstacle_type.py` classifies what the target vanished behind
+(wall / hall / room, certainty, commit at 0.8, re-classified every 0.5 s), `usecases/scan_routes.py`
+builds that scene's route (wall: swing wide past the end then along the hidden side; low wall: one look
+over first; hall: down the centre line; room: door -> both sides -> door, looped). The v2 viewpoint
+search may overrule wall/hall routes when it sees 2x more of the belief (`route_bias`); never a room's.
+People are cut out of the depth before mapping (`FollowMission._cut_people`). Unity draws the route
+(`RouteView.cs`, Z; `est.route` in the protocol). Python HUD 3-D map off unless `--hud-map`.
+New benchmark scenario `into_hall` (v1 and v2 re-run on it and merged into their json).
+59 tests + 1 skip (~10 min). Unity C# for v2 and v3 not compiled here.
+
+v2: `usecases/target_belief.py` particle filter (walk/turn/stop/inside, map walls,
 negative information), `usecases/viewpoints.py` viewpoint search (with the map), belief re-lock gate,
 `VoxelMap.height_at / top_between / free_above / occupied_above / lines_blocked / obstacle_mask`,
-mock `boxes` (walls/buildings), benchmark suite 2 (6 scenarios x 2 variants, `--suite`, `--legacy`, `--jobs`),
-Unity faded extra ghosts (`est.modes`). 55 tests + 1 skip (~10 min). Unity C# for v2 not compiled.
+mock `boxes` (walls/buildings), benchmark suite 2, Unity faded extra ghosts (`est.modes`).
 Without a map (`--no-map`, real mode) the flight is still v1; the belief only drives ghost + gate.
 
 ### v1 notes
@@ -38,16 +47,16 @@ Without a map (`--no-map`, real mode) the flight is still v1; the belief only dr
 - Not verified inside Evan's Unity yet: the Unity map view (X). C# compiles against Unity refs.
 
 ## Rules for the next thread
-1. After every update run `python tools/benchmark.py --version vN --notes "..."` from `core/` and show a before/after table. Next version is **v2**.
+1. After every update run `python tools/benchmark.py --version vN --notes "..."` from `core/` and show a before/after table. Next version is **v4**.
 2. Sync: after any change, md5-compare every file against both PC folders and push all differences, not just the files you touched (stale files broke Evan's runs twice).
 3. Keep the Python protocol (`adapters/unity/protocol.py`) and C# (`PythonBridge.cs`) in sync.
 4. New features go in `usecases/` and depend only on `ports/`; `main.py` is the only place things are wired together.
 
-## Next job: v3
-- World-frame follow controller with velocity feed-forward (reuse the v2 belief/world estimate).
-- Then orbit/spiral mapping while following; wall-penetrating radar later (hardware).
-- Open v2 items (from the research to-do): goal hints (doors/exits), give-up rule from visible-reachable
-  mass instead of timers, simulated UWB/GPS tag, speed-ups if tick p95 grows (enters_building p95 71 ms),
-  side/back cameras in suite 2 (it is front-camera only), ghost in suite-1 pillar_occlusion got worse
-  without a map (0.79 -> 4.19 m: the "stopped" guess becomes the heaviest).
-- Benchmark: `python tools/benchmark.py --version v3 --suite all --notes "..."`, compare with v2.
+## Next job: v4
+- World-frame follow that sees turns coming (Evan: "if the target is heading toward the obstacle speed up,
+  if they turn, turn with them but from the far side"): `usecases/turn_anticipation.py`.
+- Then orbit/spiral mapping while the target is idle, with one camera kept on them (Evan's idea);
+  a gimbal would let the drone look straight down over low walls.
+- Open items: goal hints (doors/exits), give-up rule from visible-reachable mass instead of timers,
+  side/back cameras in suite 2 (it is front-camera only), suite-1 pillar_occlusion ghost without a map.
+- Benchmark: `python tools/benchmark.py --version v4 --suite all --jobs 4 --notes "..."`, compare with v3.

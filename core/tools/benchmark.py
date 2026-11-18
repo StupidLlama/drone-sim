@@ -212,6 +212,14 @@ SUITE2 = [
                                        target_path=_route((-0.4, 5), (-0.4, 13.5, 1.5), (4, 13.5, 1.5),
                                                           ("wait", (10.0, 0.0)[v]), (16, 13.5, 1.5), (16, 4, 1.5))),
              start_yaw_to_target=True, suite=2, variants=("stops 10 s", "keeps walking")),
+    Scenario("into_hall", "turns into a 3 m wide hall between two 14 m walls (3.5 m high); walks through it / "
+             "stops 8 s half way", 45,
+             lambda v: MockWorldConfig(target_colors=(RED, BLUE),
+                                       boxes=(_wall(2, 12, 16, 12, 3.5), _wall(2, 15, 16, 15, 3.5)),
+                                       target_path=_route((-0.5, 4), (-0.5, 13.5, 1.5), (8.0, 13.5, 1.5),
+                                                          ("wait", (0.0, 8.0)[v]), (18.0, 13.5, 1.5),
+                                                          (18.0, 26.0, 1.5))),
+             start_yaw_to_target=True, suite=2, variants=("walks through", "stops 8 s inside")),
 ]
 ALL_SCENARIOS = SCENARIOS + SUITE2
 

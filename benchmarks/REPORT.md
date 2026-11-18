@@ -8,8 +8,9 @@ Suite 2 (occlusion suite, v2+): ghost = mean metres from the ghost to the real p
 |---|---|---|---|---|
 | **v0** | 79.6 |  | baseline: same code, appearance memory off (position-only re-lock) | 2026-11-17T18:18 |
 | **v1** | 92.7 |  | fly-over fix + appearance memory (colour) + id-swap check + ghost target | 2026-11-17T18:21 |
-| **v1-rerun** | 92.7 | 59.2 | v1 code path (--legacy) re-run on both suites, as the v2 baseline | 2026-11-18T13:46 |
-| **v2** | 92.7 | 82.2 | particle belief (walk/turn/stop/inside, map walls) + negative information + viewpoint search + obstacle-height query | 2026-11-18T13:47 |
+| **v1-rerun** | 92.7 | 64.2 | v1 code path (--legacy) re-run on both suites, as the v2 baseline (+ into_hall, run 2026-11-18 on the same code for the v3 comparison) | 2026-11-18T13:46 |
+| **v2** | 92.7 | 84.1 | particle belief (walk/turn/stop/inside, map walls) + negative information + viewpoint search + obstacle-height query (+ into_hall, run 2026-11-18 on the same code for the v3 comparison) | 2026-11-18T13:47 |
+| **v3** | 92.7 | 83.6 | scene classifier (wall/hall/room, commit at 80%) + scan routes (idea A), v2 search may overrule wall/hall routes; people cut out of the 3-D map | 2026-11-18T17:16 |
 
 ## Suite 1
 
@@ -22,6 +23,7 @@ _walks a 6 m circle at 1.2 m/s_
 | v1 | 100.0 | 0.0 | 0.0 | 4.3 / 4.08 | 0.0 |  |  | 22.59 / 29.22 |
 | v1-rerun | 100.0 | 0.0 | 0.0 | 4.3 / 4.08 | 0.0 |  |  | 27.31 / 32.67 |
 | v2 | 100.0 | 0.0 | 0.0 | 4.3 / 4.08 | 0.0 |  |  | 29.28 / 36.03 |
+| v3 | 100.0 | 0.0 | 0.0 | 4.3 / 4.08 | 0.0 |  |  | 28.5 / 33.92 |
 
 ### run_straight
 _runs straight at 2.5 m/s_
@@ -32,6 +34,7 @@ _runs straight at 2.5 m/s_
 | v1 | 100.0 | 0.0 | 0.0 | 4.75 / 4.09 | 0.0 |  |  | 21.73 / 27.35 |
 | v1-rerun | 100.0 | 0.0 | 0.0 | 4.75 / 4.09 | 0.0 |  |  | 28.46 / 33.05 |
 | v2 | 100.0 | 0.0 | 0.0 | 4.75 / 4.09 | 0.0 |  |  | 26.35 / 33.52 |
+| v3 | 100.0 | 0.0 | 0.0 | 4.75 / 4.09 | 0.0 |  |  | 29.17 / 34.82 |
 
 ### walks_at_drone
 _walks straight at the drone (drone 6 m up)_
@@ -42,6 +45,7 @@ _walks straight at the drone (drone 6 m up)_
 | v1 | 100.0 | 0.0 | 0.0 | 3.05 / 2.18 | 0.0 |  |  | 21.94 / 27.16 |
 | v1-rerun | 100.0 | 0.0 | 0.0 | 3.05 / 2.18 | 0.0 |  |  | 26.24 / 32.02 |
 | v2 | 100.0 | 0.0 | 0.0 | 3.05 / 2.18 | 0.0 |  |  | 24.89 / 31.63 |
+| v3 | 100.0 | 0.0 | 0.0 | 3.05 / 2.18 | 0.0 |  |  | 31.38 / 35.09 |
 
 ### high_start
 _drone starts 7 m up, person stands still_
@@ -52,6 +56,7 @@ _drone starts 7 m up, person stands still_
 | v1 | 100.0 | 0.0 | 0.0 | 3.99 / 3.82 | 0.0 |  |  | 22.32 / 27.57 |
 | v1-rerun | 100.0 | 0.0 | 0.0 | 3.99 / 3.82 | 0.0 |  |  | 25.74 / 31.37 |
 | v2 | 100.0 | 0.0 | 0.0 | 3.99 / 3.82 | 0.0 |  |  | 27.7 / 32.72 |
+| v3 | 100.0 | 0.0 | 0.0 | 3.99 / 3.82 | 0.0 |  |  | 29.08 / 34.67 |
 
 ### pillar_occlusion
 _walks behind a 5 m wide pillar_
@@ -62,6 +67,7 @@ _walks behind a 5 m wide pillar_
 | v1 | 81.6 | 0.0 | 18.4 | 6.46 / 3.95 | 0.0 | 5.9 | 1.66 | 21.82 / 27.43 |
 | v1-rerun | 81.6 | 0.0 | 18.4 | 6.46 / 3.95 | 0.0 | 5.9 | 1.66 | 25.76 / 32.75 |
 | v2 | 81.6 | 0.0 | 18.4 | 6.46 / 3.95 | 0.0 | 5.9 | 1.66 | 25.0 / 31.26 |
+| v3 | 81.6 | 0.0 | 18.4 | 6.46 / 3.95 | 0.0 | 5.9 | 1.66 | 25.98 / 32.34 |
 
 ### decoy_at_exit
 _steps into a shop for 8 s; meanwhile someone in the SAME red shirt (green trousers) walks on exactly where the target was heading_
@@ -72,6 +78,7 @@ _steps into a shop for 8 s; meanwhile someone in the SAME red shirt (green trous
 | v1 | 68.6 | 0.0 | 31.4 | 4.49 / 1.02 | 3.0 | 11.6 |  | 21.11 / 26.69 |
 | v1-rerun | 68.6 | 0.0 | 31.4 | 4.49 / 1.02 | 3.0 | 11.6 |  | 26.92 / 32.61 |
 | v2 | 68.6 | 0.0 | 31.4 | 4.49 / 1.02 | 3.0 | 11.6 |  | 28.47 / 32.31 |
+| v3 | 68.6 | 0.0 | 31.4 | 4.49 / 1.02 | 3.0 | 11.6 |  | 27.87 / 33.9 |
 
 ### crossing_swap
 _a look-alike (same shirt) crosses right in front; tracker swaps their ids_
@@ -82,6 +89,7 @@ _a look-alike (same shirt) crosses right in front; tracker swaps their ids_
 | v1 | 92.0 | 1.5 | 6.5 | 4.42 / 3.55 | 0.0 | 0.4 |  | 22.36 / 28.98 |
 | v1-rerun | 92.0 | 1.5 | 6.5 | 4.42 / 3.55 | 0.0 | 0.4 |  | 26.15 / 31.99 |
 | v2 | 92.0 | 1.5 | 6.5 | 4.42 / 3.55 | 0.0 | 0.4 |  | 25.11 / 30.42 |
+| v3 | 92.0 | 1.5 | 6.5 | 4.42 / 3.55 | 0.0 | 0.4 |  | 27.02 / 34.52 |
 
 ### crowd_walk
 _circle walk with 3 other people wandering nearby (different clothes)_
@@ -92,6 +100,7 @@ _circle walk with 3 other people wandering nearby (different clothes)_
 | v1 | 98.4 | 1.6 | 0.0 | 4.27 / 3.51 | 0.0 | 0.6 |  | 22.15 / 27.81 |
 | v1-rerun | 98.4 | 1.6 | 0.0 | 4.27 / 3.51 | 0.0 | 0.6 |  | 28.05 / 33.43 |
 | v2 | 98.4 | 1.6 | 0.0 | 4.27 / 3.51 | 0.0 | 0.6 |  | 27.06 / 32.67 |
+| v3 | 98.4 | 1.6 | 0.0 | 4.27 / 3.51 | 0.0 | 0.6 |  | 26.81 / 34.47 |
 
 ### noisy_detector
 _missed frames, jitter, 100 ms lag, wind_
@@ -102,6 +111,7 @@ _missed frames, jitter, 100 ms lag, wind_
 | v1 | 100.0 | 0.0 | 0.0 | 4.41 / 3.93 | 0.0 |  |  | 22.48 / 28.44 |
 | v1-rerun | 100.0 | 0.0 | 0.0 | 4.41 / 3.93 | 0.0 |  |  | 28.39 / 33.29 |
 | v2 | 100.0 | 0.0 | 0.0 | 4.41 / 3.93 | 0.0 |  |  | 28.35 / 32.34 |
+| v3 | 100.0 | 0.0 | 0.0 | 4.41 / 3.93 | 0.0 |  |  | 26.14 / 32.77 |
 
 ### branch_climb
 _4 cm branch across the path at flight height (sonar)_
@@ -112,6 +122,7 @@ _4 cm branch across the path at flight height (sonar)_
 | v1 | 100.0 | 0.0 | 0.0 | 4.42 / 4.02 | 0.0 |  | 0.98 | 31.65 / 40.38 |
 | v1-rerun | 100.0 | 0.0 | 0.0 | 4.42 / 4.02 | 0.0 |  | 0.98 | 44.12 / 51.21 |
 | v2 | 100.0 | 0.0 | 0.0 | 4.42 / 4.02 | 0.0 |  | 0.98 | 44.95 / 52.86 |
+| v3 | 100.0 | 0.0 | 0.0 | 4.42 / 4.02 | 0.0 |  | 0.98 | 41.44 / 54.04 |
 
 ### shirt_only
 _colour tracker that only sees the red shirt (like Unity)_
@@ -122,6 +133,7 @@ _colour tracker that only sees the red shirt (like Unity)_
 | v1 | 100.0 | 0.0 | 0.0 | 4.28 / 4.03 | 0.0 |  |  | 21.47 / 26.73 |
 | v1-rerun | 100.0 | 0.0 | 0.0 | 4.28 / 4.03 | 0.0 |  |  | 27.88 / 34.01 |
 | v2 | 100.0 | 0.0 | 0.0 | 4.28 / 4.03 | 0.0 |  |  | 26.96 / 34.05 |
+| v3 | 100.0 | 0.0 | 0.0 | 4.28 / 4.03 | 0.0 |  |  | 28.07 / 34.72 |
 
 ## Suite 2 (occlusion)
 
@@ -134,6 +146,8 @@ _walks behind a 5 m wide pillar and stops in its shadow (10 s / 5 s), then walks
 | v1-rerun | stop 5 s | 86.9 | 0.0 | 0.0 | 4.8 | 0.5 | 1.46 |  /  | 71.1 | 2.02 | 30.46 / 40.65 |
 | v2 | stop 10 s | 89.5 | 0.0 | 0.0 | 3.9 | 0.5 | 1.04 |  /  | 96.2 | 2.31 | 31.79 / 42.97 |
 | v2 | stop 5 s | 89.5 | 0.0 | 0.0 | 3.9 | 0.5 | 1.04 |  /  | 96.2 | 2.31 | 32.07 / 41.74 |
+| v3 | stop 10 s | 88.8 | 0.0 | 0.0 | 4.1 | 0.5 | 1.12 |  /  | 81.9 | 2.31 | 29.74 / 39.77 |
+| v3 | stop 5 s | 88.8 | 0.0 | 0.0 | 4.1 | 0.5 | 1.12 |  /  | 81.9 | 2.31 | 32.18 / 43.09 |
 
 ### turn_at_corner
 _walks up the side of an 8x8 m building and turns round its far corner (keeps going / stops 8 s behind it)_
@@ -144,6 +158,8 @@ _walks up the side of an 8x8 m building and turns round its far corner (keeps go
 | v1-rerun | stops behind it | 72.9 | 0.0 | 2.8 | 11.4 | 6.8 | 2.77 | 2.04 / 4.96 | 43.9 | 1.49 | 31.98 / 42.45 |
 | v2 | keeps going | 93.9 | 0.0 | 0.0 | 2.6 | 0.5 | 0.92 |  /  | 100.0 | 1.04 | 32.76 / 41.87 |
 | v2 | stops behind it | 93.9 | 0.0 | 0.0 | 2.6 | 0.5 | 0.92 |  /  | 100.0 | 0.69 | 32.96 / 42.42 |
+| v3 | keeps going | 93.9 | 0.0 | 0.0 | 2.6 | 0.5 | 0.92 |  /  | 100.0 | 0.94 | 31.77 / 43.34 |
+| v3 | stops behind it | 93.9 | 0.0 | 0.0 | 2.6 | 0.5 | 0.92 |  /  | 100.0 | 0.79 | 31.56 / 42.39 |
 
 ### u_turn_hidden
 _goes behind a 12 m wall, turns back after 4 / 6.5 m, comes out where it went in_
@@ -154,6 +170,8 @@ _goes behind a 12 m wall, turns back after 4 / 6.5 m, comes out where it went in
 | v1-rerun | turns at 6.5 m | 66.5 | 0.0 | 1.6 | 14.1 | 10.1 | 5.68 | 2.49 / 8.6 | 22.8 | 2.52 | 33.18 / 44.02 |
 | v2 | turns at 4 m | 92.0 | 0.0 | 0.0 | 3.4 | 0.5 | 0.91 |  /  | 100.0 | 2.86 | 35.01 / 43.36 |
 | v2 | turns at 6.5 m | 92.0 | 0.0 | 0.8 | 3.4 | 0.5 | 1.35 |  /  | 98.5 | 1.66 | 33.13 / 44.26 |
+| v3 | turns at 4 m | 92.0 | 0.0 | 0.0 | 3.4 | 0.5 | 0.89 |  /  | 100.0 | 2.86 | 33.4 / 43.99 |
+| v3 | turns at 6.5 m | 92.0 | 0.0 | 0.8 | 3.4 | 0.5 | 1.36 |  /  | 100.0 | 1.7 | 34.14 / 44.45 |
 
 ### enters_building
 _walks into a 10x6 m shop, stays 15 s, leaves by the same door / a second door_
@@ -164,6 +182,8 @@ _walks into a 10x6 m shop, stays 15 s, leaves by the same door / a second door_
 | v1-rerun | other door | 15.3 | 0.0 | 4.3 | never | never | 9.31 | 2.19 / 4.13 | 12.1 | 1.47 | 32.24 / 41.54 |
 | v2 | same door | 59.7 | 0.0 | 0.0 | 19.0 | 0.5 | 2.05 | 2.26 / 2.26 | 57.3 | 3.02 | 37.53 / 71.43 |
 | v2 | other door | 44.4 | 0.0 | 0.0 | 26.2 | 0.5 | 4.21 | 2.26 / 2.26 | 31.2 | 2.44 | 33.62 / 54.94 |
+| v3 | same door | 59.7 | 0.0 | 0.0 | 19.0 | 0.5 | 2.06 | 2.26 / 2.28 | 39.3 | 3.02 | 35.75 / 56.46 |
+| v3 | other door | 44.7 | 0.0 | 0.0 | 26.0 | 0.6 | 4.18 | 2.26 / 2.28 | 19.2 | 2.13 | 36.68 / 61.2 |
 
 ### decoy_at_exit_geo
 _steps into a real shop for 8 / 12 s; a same-shirt decoy walks on where it was heading_
@@ -174,6 +194,8 @@ _steps into a real shop for 8 / 12 s; a same-shirt decoy walks on where it was h
 | v1-rerun | 12 s inside | 43.3 | 0.0 | 4.2 | 23.8 | 0.6 | 6.65 | 3.82 / 5.87 | 12.6 | 2.49 | 31.78 / 41.91 |
 | v2 | 8 s inside | 76.5 | 0.0 | 0.0 | 9.9 | 0.5 | 1.09 | 1.19 /  | 100.0 | 2.35 | 34.29 / 45.22 |
 | v2 | 12 s inside | 67.0 | 0.0 | 0.0 | 13.9 | 0.5 | 1.12 | 1.19 / 1.19 | 100.0 | 2.35 | 35.63 / 47.64 |
+| v3 | 8 s inside | 76.5 | 0.0 | 0.0 | 9.9 | 0.5 | 1.09 | 1.19 /  | 100.0 | 3.28 | 33.95 / 48.59 |
+| v3 | 12 s inside | 63.0 | 0.0 | 0.0 | 15.6 | 2.2 | 1.11 | 1.19 / 1.19 | 100.0 | 1.93 | 34.62 / 53.81 |
 
 ### low_wall_see_over
 _walks round the end of a 2.2 m wall and along behind it, stops 10 s / keeps walking; the drone can see over by climbing_
@@ -184,3 +206,17 @@ _walks round the end of a 2.2 m wall and along behind it, stops 10 s / keeps wal
 | v1-rerun | keeps walking | 93.6 | 0.0 | 0.0 | 2.4 | 0.5 | 0.91 |  /  | 100.0 | 1.25 | 31.53 / 42.21 |
 | v2 | stops 10 s | 95.7 | 0.0 | 0.0 | 1.6 | 0.5 | 0.84 |  /  | 100.0 | 0.83 | 32.29 / 43.28 |
 | v2 | keeps walking | 95.7 | 0.0 | 0.0 | 1.6 | 0.5 | 0.84 |  /  | 100.0 | 0.99 | 33.5 / 42.77 |
+| v3 | stops 10 s | 95.0 | 0.0 | 0.0 | 1.9 | 0.5 | 0.89 |  /  | 100.0 | 0.95 | 31.25 / 42.55 |
+| v3 | keeps walking | 95.0 | 0.0 | 0.0 | 1.9 | 0.5 | 0.89 |  /  | 100.0 | 0.98 | 31.88 / 43.86 |
+
+### into_hall
+_turns into a 3 m wide hall between two 14 m walls (3.5 m high); walks through it / stops 8 s half way_
+
+| version | variant | on % | wrong % | close s | relock s | refind s | ghost m | @5s / @10s | top3 % | clearance m | tick ms mean/p95 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| v1-rerun | walks through | 94.2 | 0.0 | 0.0 | 2.5 | 0.5 | 0.27 |  /  | 100.0 | 1.11 | 29.97 / 40.73 |
+| v1-rerun | stops 8 s inside | 94.0 | 0.0 | 0.0 | 2.5 | 0.5 | 0.47 |  /  | 100.0 | 1.01 | 31.28 / 42.56 |
+| v2 | walks through | 96.4 | 0.0 | 0.0 | 1.5 | 0.5 | 0.54 |  /  | 100.0 | 1.11 | 33.36 / 44.11 |
+| v2 | stops 8 s inside | 94.5 | 0.0 | 0.0 | 1.5 | 0.5 | 0.32 |  /  | 100.0 | 1.05 | 34.9 / 46.8 |
+| v3 | walks through | 96.4 | 0.0 | 0.0 | 1.5 | 0.5 | 0.54 |  /  | 100.0 | 1.11 | 31.02 / 42.67 |
+| v3 | stops 8 s inside | 94.5 | 0.0 | 0.0 | 1.5 | 0.5 | 0.32 |  /  | 100.0 | 1.05 | 31.62 / 43.5 |

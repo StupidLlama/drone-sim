@@ -15,6 +15,8 @@ from drone_core.domain.models import FOUR_CAMERA_RIG
 from drone_core.usecases.target_selection import TargetSelector
 from drone_core.usecases.target_belief import BeliefConfig, TargetBelief
 from drone_core.usecases.viewpoints import ViewpointConfig, ViewpointPlanner
+from drone_core.usecases.obstacle_type import ObstacleClassifier, Scene, SceneConfig
+from drone_core.usecases.scan_routes import RouteConfig, RouteRunner, build_route
 
 
 @dataclass
@@ -86,6 +88,12 @@ class FollowConfig:
     # belief is within belief_gate_r of it (or it is near a top cluster).
     belief_gate_mass: float = 0.004
     belief_gate_r: float = 1.5
+    # v3: work out what they vanished behind (wall / hall / room) and fly that
+    # scene's scan route once sure enough (SceneConfig.commit, 80%). Needs the map.
+    use_scenes: bool = True
+    scenes: SceneConfig = field(default_factory=SceneConfig)
+    routes: RouteConfig = field(default_factory=RouteConfig)
+    route_bias: float = 2.0             # the v2 search overrules the route only when this much better
 
 
     @property
@@ -134,6 +142,15 @@ class FollowTarget:
         self.planner = ViewpointPlanner(self.cfg.viewpoints)
         self._cams_seen = {"front"}
         self._people_xy: list = []                  # ground (x, y) of everyone detected this frame
+        # v3: scene classifier + scan route
+        self.classifier = ObstacleClassifier(self.cfg.scenes)
+        self.runner = RouteRunner()
+        self.scene: Optional[Scene] = None          # latest classification while lost
+        self.route_kind: Optional[str] = None       # scene whose route is being flown
+        self._scene_t = -1e9
+        self._lost_vel: Optional[tuple] = None
+        self._route_check_t = -1e9
+        self._route_overruled = False
 
     def reset(self) -> None:
         if self.appearance is not None:
@@ -152,6 +169,7 @@ class FollowTarget:
         self._los_until = -1.0
         self.belief.reset()
         self.planner.reset()
+        self._clear_scene()
 
     def step(self, tracks: list[Track], frame_w: int, frame_h: int, t: float,
              telem: Optional[Telemetry] = None,
@@ -193,6 +211,7 @@ class FollowTarget:
             self._orbit = None
             self.belief.reset()
             self.planner.reset()
+            self._clear_scene()
         ex = est.cx - c.desired_cx                           # + = target right of centre
         ey = c.desired_cy - est.cy                           # + = target above centre
         ed = math.log(c.desired_box_height / max(est.h, 1e-3))  # + = too far
@@ -268,6 +287,10 @@ class FollowTarget:
                "r": float(r), "state": state.split(" ")[0]}
         if modes is not None:
             out["modes"] = modes
+        if lost:
+            ri = self.route_info()
+            if ri is not None:
+                out["route"] = ri
         return out
 
     def belief_points(self, m: int = 150):
@@ -466,6 +489,7 @@ class FollowTarget:
         self._orbit = None
         self.belief.reset()
         self.planner.reset()
+        self._clear_scene()
         for p in (c.yaw, c.vertical, c.distance):
             p.reset()
         rel = cam.bearing(tr.box, frame_w)
@@ -495,6 +519,7 @@ class FollowTarget:
         pred = self.world.predict(t, horizon_cap=c.reacquire_s)
         if self._lost_pos is None and self.world.pos is not None:
             self._lost_pos = self.world.pos
+            self._lost_vel = self.world.vel
         if telem is not None and pred is not None and c.use_belief:
             self._update_belief(t, telem)
             # With a map: fly wherever sees the most of the belief. Without one
@@ -502,6 +527,10 @@ class FollowTarget:
             # so keep v1's flight and use the belief only for the ghost and the
             # re-lock gate (a person who stopped still gets picked up).
             if self.obstacle_map is not None and self.belief.clusters(1):
+                if c.use_scenes and lost_for < c.reacquire_s + c.orbit_s:
+                    st = self._scan_route(telem, t, lost_for)
+                    if st is not None:
+                        return st
                 if lost_for < c.reacquire_s:
                     return self._search_viewpoint(telem, t, lost_for, "REACQUIRING")
                 if lost_for < c.reacquire_s + c.orbit_s:
@@ -567,9 +596,95 @@ class FollowTarget:
                                                "vp_z": round(vp.z, 1), "ghost_mode": main.mode,
                                                "ghost_w": round(main.w, 2)})
 
+    # --- v3: scene + scan route ---------------------------------------------------
+    def _clear_scene(self) -> None:
+        self.scene = None
+        self.route_kind = None
+        self.runner.clear()
+        self._scene_t = -1e9
+        self._lost_vel = None
+        self._route_check_t = -1e9
+        self._route_overruled = False
+
+    def _classify(self, telem: Telemetry, t: float) -> None:
+        c = self.cfg
+        if t - self._scene_t < c.scenes.every_s or self._lost_pos is None:
+            return
+        self._scene_t = t
+        shares = self.belief.mode_shares() if hasattr(self.belief, "mode_shares") else {}
+        main = self.belief.clusters(1)
+        bxy = (main[0].x, main[0].y) if main else None
+        vel = self._lost_vel
+        heading = vel if vel is not None and math.hypot(vel[0], vel[1]) > 0.2 else (
+            self._lost_pos[0] - telem.position[0], self._lost_pos[1] - telem.position[1])
+        self.scene = self.classifier.classify(self.obstacle_map, self._lost_pos, heading,
+                                              inside_share=float(shares.get("inside", 0.0)), belief_xy=bxy,
+                                              drone_xy=tuple(telem.position[:2]),
+                                              max_alt=c.viewpoints.max_alt)
+        sc = self.scene
+        if sc.kind is not None and sc.cert >= c.scenes.commit and sc.kind != self.route_kind:
+            # sure enough (first time, or the map now says it's something else): fly its route
+            route = build_route(sc, self._search_alt(telem), c.routes)
+            if route:
+                self.route_kind = sc.kind
+                self.runner.start(route, loop=sc.kind == "room")
+        elif self.route_kind is not None and sc.probs.get(self.route_kind, 0.0) < 0.4:
+            # the map no longer backs that scene: back to the v2 search
+            self.route_kind = None
+            self.runner.clear()
+
+    def _scan_route(self, telem: Telemetry, t: float, lost_for: float) -> Optional[FollowStatus]:
+        """Fly the committed scene's scan route; None = no route (use v2's search)."""
+        self._classify(telem, t)
+        if self.route_kind is None:
+            return None
+        w = self.runner.current(tuple(telem.position), t)
+        if w is None:
+            return None                     # route finished: the v2 search takes over
+        c = self.cfg
+        # The route is the plan, but the v2 search may overrule it when it can
+        # see clearly more of where they could be (route_bias x the score of the
+        # route's next stop), e.g. the person is already coming back out.
+        if t - self._route_check_t >= c.viewpoints.every_s:
+            self._route_check_t = t
+            vp = self.planner.plan(t, tuple(telem.position), telem.yaw, self._search_alt(telem), self.belief,
+                                   self._cams(), self.obstacle_map, force=True)
+            ws = self.planner.score_point(tuple(telem.position), w.x, w.y, w.z, (w.lx, w.ly), self.belief,
+                                          self._cams(), self.obstacle_map)
+            # A room's route is checking for other doors, which the belief doesn't
+            # know about (it only waits at the door they used): never overrule it.
+            bias = c.route_bias if self.route_kind != "room" else float("inf")
+            self._route_overruled = vp is not None and vp.score > bias * ws
+        if self._route_overruled:
+            st = self._search_viewpoint(telem, t, lost_for, "REACQUIRING" if lost_for < c.reacquire_s else "SEARCHING")
+            st.errors.update({"scene": self.route_kind, "wp": self.runner.i, "wp_label": "overruled"})
+            return st
+        dx, dy = w.x - telem.position[0], w.y - telem.position[1]
+        dist = math.hypot(dx, dy)
+        v = min(c.reacquire_speed, 0.8 * dist)
+        vx, vy = (v * dx / dist, v * dy / dist) if dist > 1e-6 else (0.0, 0.0)
+        cmd = self._world_cmd(vx, vy, w.lx, w.ly, telem, alt=w.z)
+        state = "REACQUIRING" if lost_for < c.reacquire_s else "SEARCHING"
+        return FollowStatus(state, None, cmd, {"lost_s": lost_for, "scene": self.route_kind,
+                                               "cert": self.scene.cert if self.scene else 0.0,
+                                               "wp": self.runner.i, "wp_label": w.label})
+
+    def route_info(self) -> Optional[dict]:
+        """The scene and route being flown, for Unity / the HUD. None = none."""
+        sc = self.scene
+        if sc is None:
+            return None
+        out = {"kind": sc.kind or "", "cert": round(float(sc.cert), 2), "active": int(self.route_kind is not None)}
+        if self.route_kind is not None:
+            out["kind"] = self.route_kind
+            out["i"] = int(self.runner.i)
+            out["pts"] = [[round(w.x, 2), round(w.y, 2), round(w.z, 2)] for w in self.runner.route]
+        return out
+
     def _forget(self) -> None:
         self.belief.reset()
         self.planner.reset()
+        self._clear_scene()
         if self.appearance is not None:
             self.appearance.reset()
         self.selector.reset()

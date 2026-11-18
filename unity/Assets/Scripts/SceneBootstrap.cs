@@ -82,6 +82,7 @@ public class SceneBootstrap : MonoBehaviour
 
         new GameObject("GhostTarget").AddComponent<GhostTarget>();   // where Python thinks the target is
         new GameObject("MapView").AddComponent<MapView>();           // Python's 3-D obstacle map
+        new GameObject("RouteView").AddComponent<RouteView>().drone = drone.transform;   // v3: scene + scan route while hidden
 
         var hud = new GameObject("HUD").AddComponent<SimHUD>();
         hud.drone = drone;
