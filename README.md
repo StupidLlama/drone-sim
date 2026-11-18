@@ -37,6 +37,7 @@ core/
       viewpoints.py           v2: pick the spot that sees the most of that cloud (climbs over low walls)
       obstacle_type.py        v3: what did they vanish behind? wall / hall / room, with a certainty
       scan_routes.py          v3: the scan route for each of those (Evan's idea A)
+      turn_anticipation.py    v4: see a turn coming while following (close in, swing to the outside)
       voxel_map.py            3-D map from sonar + depth; line of sight, obstacle-height queries
       follow_target.py        visual servo: yaw←x offset, climb←y offset, forward←log(box height)
                               + COASTING → REACQUIRING → SEARCHING → IDLE when the target is lost
@@ -273,6 +274,20 @@ climbs above 10 m (`los_max_altitude`), or so high that the person would drop ou
 bottom of the front camera. The sonar's overhead check still stops it climbing into
 branches. The debug window shows `view: blocked: climbing` / `holding height`.
 
+### Seeing the turn coming (v4)
+
+While following with the 3-D map, the core looks along the person's path for the next
+3 s (`usecases/turn_anticipation.py`). If their path runs into a wall (they must turn; the
+side with more open space is the likely way) or a wall beside them ends (a corner they
+may turn round), it **closes in** to 65% of the follow distance and **moves 2.5 m to the
+outside of the turn**: from the far side the view wraps round the corner, from the inside
+the corner cuts it. It keeps that for 1.5 s after the reason has passed (they're
+turning). It never closes in under 3 m, or when they're walking back toward the drone.
+The debug window shows `turn: corner ahead (right)`. No map or a person standing still =
+no change. Tune it in `FollowConfig.anticipate`. Also in v4: during a room route the drone
+re-locks on someone right by the building (within 4 m), because they may come out of a
+door the belief doesn't know about.
+
 ### Keeping its distance (not flying over the person)
 
 With telemetry, the follow distance is measured on the ground, not from box size alone:
@@ -430,6 +445,13 @@ Every message: `uint32 BE length(type+payload) | uint8 type | payload`.
 Unity hovers if no command arrives for 0.5 s; Python hovers if frames stop for 0.5 s.
 
 ## What's tested and what isn't
+
+* **v4 turn anticipation (1 new test, 60 + 1 skipped in all):** walking up the side of a
+  building toward its corner gives "corner ahead, right" and a move to the outside (west);
+  walking at a wall with open space on one side gives "wall ahead" toward that side; open
+  ground or a person standing still gives nothing. Benchmark suite 2: 83.6 (v3) -> 84.6
+  (v4): the corner scenario is never lost now (93.9 -> 100% on target), the hidden U-turn
+  is re-found sooner (3.4 -> 2.9 s); suite 1 stays 92.7.
 
 * **v3 scan routes (4 new tests, 59 + 1 skipped in all):** on a stub map the classifier
   calls a 12 m wall a wall (≥80%, the far side and the right end), two walls 3 m apart a
