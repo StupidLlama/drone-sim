@@ -1,0 +1,194 @@
+{
+ "version": "v1",
+ "notes": "fly-over fix + appearance memory (colour) + id-swap check + ghost target",
+ "reid": "hist",
+ "created": "2026-11-17T18:21:02",
+ "machine": "Linux x86_64 py3.13.18",
+ "score": 92.7,
+ "results": {
+  "circle_walk": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.3,
+   "dist_min": 4.08,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 22.59,
+   "tick_ms_p95": 29.22,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 37.0
+   }
+  },
+  "run_straight": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.75,
+   "dist_min": 4.09,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 21.73,
+   "tick_ms_p95": 27.35,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 27.0
+   }
+  },
+  "walks_at_drone": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 3.05,
+   "dist_min": 2.18,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 21.94,
+   "tick_ms_p95": 27.16,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 12.0
+   }
+  },
+  "high_start": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 3.99,
+   "dist_min": 3.82,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 22.32,
+   "tick_ms_p95": 27.57,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 12.0
+   }
+  },
+  "pillar_occlusion": {
+   "on_target_pct": 81.6,
+   "wrong_pct": 0.0,
+   "lost_pct": 18.4,
+   "dist_mean": 6.46,
+   "dist_min": 3.95,
+   "too_close_s": 0.0,
+   "relock_s": 5.9,
+   "clearance_m": 1.66,
+   "tick_ms_mean": 21.82,
+   "tick_ms_p95": 27.43,
+   "swaps_caught": 0,
+   "states": {
+    "COASTING": 0.2,
+    "REACQUIRING": 5.9,
+    "TRACKING": 25.9
+   }
+  },
+  "decoy_at_exit": {
+   "on_target_pct": 68.6,
+   "wrong_pct": 0.0,
+   "lost_pct": 31.4,
+   "dist_mean": 4.49,
+   "dist_min": 1.02,
+   "too_close_s": 3.0,
+   "relock_s": 11.6,
+   "clearance_m": null,
+   "tick_ms_mean": 21.11,
+   "tick_ms_p95": 26.69,
+   "swaps_caught": 0,
+   "states": {
+    "COASTING": 0.6,
+    "REACQUIRING": 7.3,
+    "SEARCHING": 4.2,
+    "TRACKING": 24.8
+   }
+  },
+  "crossing_swap": {
+   "on_target_pct": 92.0,
+   "wrong_pct": 1.5,
+   "lost_pct": 6.5,
+   "dist_mean": 4.42,
+   "dist_min": 3.55,
+   "too_close_s": 0.0,
+   "relock_s": 0.4,
+   "clearance_m": null,
+   "tick_ms_mean": 22.36,
+   "tick_ms_p95": 28.98,
+   "swaps_caught": 2,
+   "states": {
+    "COASTING": 0.8,
+    "REACQUIRING": 0.9,
+    "TRACKING": 25.2
+   }
+  },
+  "crowd_walk": {
+   "on_target_pct": 98.4,
+   "wrong_pct": 1.6,
+   "lost_pct": 0.0,
+   "dist_mean": 4.27,
+   "dist_min": 3.51,
+   "too_close_s": 0.0,
+   "relock_s": 0.6,
+   "clearance_m": null,
+   "tick_ms_mean": 22.15,
+   "tick_ms_p95": 27.81,
+   "swaps_caught": 1,
+   "states": {
+    "TRACKING": 37.0
+   }
+  },
+  "noisy_detector": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.41,
+   "dist_min": 3.93,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 22.48,
+   "tick_ms_p95": 28.44,
+   "swaps_caught": 0,
+   "states": {
+    "COASTING": 6.8,
+    "TRACKING": 30.2
+   }
+  },
+  "branch_climb": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.42,
+   "dist_min": 4.02,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": 0.98,
+   "tick_ms_mean": 31.65,
+   "tick_ms_p95": 40.38,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 22.0
+   }
+  },
+  "shirt_only": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.28,
+   "dist_min": 4.03,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 21.47,
+   "tick_ms_p95": 26.73,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 27.0
+   }
+  }
+ }
+}

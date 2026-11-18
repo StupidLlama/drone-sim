@@ -1,0 +1,191 @@
+{
+ "version": "v0",
+ "notes": "baseline: same code, appearance memory off (position-only re-lock)",
+ "reid": "none",
+ "created": "2026-11-17T18:18:27",
+ "machine": "Linux x86_64 py3.13.18",
+ "score": 79.6,
+ "results": {
+  "circle_walk": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.3,
+   "dist_min": 4.08,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 20.73,
+   "tick_ms_p95": 25.26,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 37.0
+   }
+  },
+  "run_straight": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.75,
+   "dist_min": 4.09,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 20.37,
+   "tick_ms_p95": 23.22,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 27.0
+   }
+  },
+  "walks_at_drone": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 3.05,
+   "dist_min": 2.18,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 21.38,
+   "tick_ms_p95": 23.57,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 12.0
+   }
+  },
+  "high_start": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 3.99,
+   "dist_min": 3.82,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 20.79,
+   "tick_ms_p95": 23.64,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 12.0
+   }
+  },
+  "pillar_occlusion": {
+   "on_target_pct": 81.6,
+   "wrong_pct": 0.0,
+   "lost_pct": 18.4,
+   "dist_mean": 6.46,
+   "dist_min": 3.95,
+   "too_close_s": 0.0,
+   "relock_s": 5.9,
+   "clearance_m": 1.66,
+   "tick_ms_mean": 21.3,
+   "tick_ms_p95": 27.42,
+   "swaps_caught": 0,
+   "states": {
+    "COASTING": 0.2,
+    "REACQUIRING": 5.9,
+    "TRACKING": 25.9
+   }
+  },
+  "decoy_at_exit": {
+   "on_target_pct": 9.7,
+   "wrong_pct": 87.7,
+   "lost_pct": 2.6,
+   "dist_mean": 4.7,
+   "dist_min": 1.06,
+   "too_close_s": 2.7,
+   "relock_s": "never",
+   "clearance_m": null,
+   "tick_ms_mean": 21.62,
+   "tick_ms_p95": 26.38,
+   "swaps_caught": 0,
+   "states": {
+    "COASTING": 0.6,
+    "REACQUIRING": 0.9,
+    "TRACKING": 35.5
+   }
+  },
+  "crossing_swap": {
+   "on_target_pct": 98.1,
+   "wrong_pct": 1.9,
+   "lost_pct": 0.0,
+   "dist_mean": 4.3,
+   "dist_min": 3.55,
+   "too_close_s": 0.0,
+   "relock_s": 0.5,
+   "clearance_m": null,
+   "tick_ms_mean": 20.44,
+   "tick_ms_p95": 22.11,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 27.0
+   }
+  },
+  "crowd_walk": {
+   "on_target_pct": 43.1,
+   "wrong_pct": 56.9,
+   "lost_pct": 0.0,
+   "dist_mean": 5.4,
+   "dist_min": 2.6,
+   "too_close_s": 0.0,
+   "relock_s": 14.8,
+   "clearance_m": null,
+   "tick_ms_mean": 23.53,
+   "tick_ms_p95": 28.66,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 37.0
+   }
+  },
+  "noisy_detector": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.41,
+   "dist_min": 3.93,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 21.58,
+   "tick_ms_p95": 27.15,
+   "swaps_caught": 0,
+   "states": {
+    "COASTING": 6.8,
+    "TRACKING": 30.2
+   }
+  },
+  "branch_climb": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.42,
+   "dist_min": 4.02,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": 0.98,
+   "tick_ms_mean": 32.62,
+   "tick_ms_p95": 40.97,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 22.0
+   }
+  },
+  "shirt_only": {
+   "on_target_pct": 100.0,
+   "wrong_pct": 0.0,
+   "lost_pct": 0.0,
+   "dist_mean": 4.28,
+   "dist_min": 4.03,
+   "too_close_s": 0.0,
+   "relock_s": null,
+   "clearance_m": null,
+   "tick_ms_mean": 22.22,
+   "tick_ms_p95": 25.75,
+   "swaps_caught": 0,
+   "states": {
+    "TRACKING": 27.0
+   }
+  }
+ }
+}

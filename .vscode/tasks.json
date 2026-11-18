@@ -1,0 +1,29 @@
+{
+  // Ctrl+Shift+B runs the default one (Unity + color tracker).
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Drone: Unity (color tracker)",
+      "type": "shell",
+      "command": "python main.py --mode unity --tracker color",
+      "options": { "cwd": "${workspaceFolder}/core" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Drone: Unity (YOLO)",
+      "type": "shell",
+      "command": "python main.py --mode unity --tracker yolo",
+      "options": { "cwd": "${workspaceFolder}/core" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Drone: run tests",
+      "type": "shell",
+      "command": "python -m pytest -q",
+      "options": { "cwd": "${workspaceFolder}/core" },
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

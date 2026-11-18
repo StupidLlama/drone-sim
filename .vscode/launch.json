@@ -1,0 +1,36 @@
+{
+  // Run and Debug panel (Ctrl+Shift+D): pick one, then press F5 or the green arrow.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Drone: Unity (color tracker)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/core/main.py",
+      "cwd": "${workspaceFolder}/core",
+      "args": ["--mode", "unity", "--tracker", "color"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Drone: Unity (YOLO)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/core/main.py",
+      "cwd": "${workspaceFolder}/core",
+      "args": ["--mode", "unity", "--tracker", "yolo"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Drone: Mock (no Unity)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/core/main.py",
+      "cwd": "${workspaceFolder}/core",
+      "args": ["--mode", "mock", "--tracker", "color"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

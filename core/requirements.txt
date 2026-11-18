@@ -1,0 +1,8 @@
+numpy>=1.24
+opencv-python>=4.8        # use opencv-python-headless on a headless companion computer
+ultralytics>=8.3.114      # YOLO + ByteTrack/BoT-SORT with re-ID (pulls in torch)
+lap>=0.5                  # ByteTrack assignment; ultralytics auto-installs it otherwise
+pytest>=7
+onnxruntime>=1.17         # yolo26n-reid appearance network (--reid net)
+# real drone only:
+# mavsdk>=2.0
