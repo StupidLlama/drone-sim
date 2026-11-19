@@ -1,12 +1,12 @@
 {
  "version": "v4",
- "notes": "turn anticipation while following: wall/corner ahead on the map -> close in to 65% (>= 3 m, not when they walk at us) and swing 2.5 m to the outside of the turn; room route re-locks on anyone by the building",
+ "notes": "turn anticipation while following: wall/corner ahead on the map -> close in to 65% (>= 3 m, not when they walk at us) and swing 2.5 m to the outside of the turn; room route re-locks on anyone by the building (+ round_wall_end, run 2026-11-19 on the same code)",
  "reid": "hist",
  "legacy": false,
  "created": "2026-11-18T17:35:42",
  "machine": "Linux x86_64 py3.13.18",
  "score_suite1": 92.7,
- "score_suite2": 84.6,
+ "score_suite2": 75.9,
  "results": {
   "circle_walk": {
    "on_target_pct": 100.0,
@@ -619,6 +619,60 @@
    "ghost_err_10s": null,
    "top3_pct": 100.0,
    "refind_s": 0.5,
+   "wrong_relocks": 0
+  },
+  "round_wall_end.0": {
+   "on_target_pct": 26.3,
+   "wrong_pct": 0.0,
+   "lost_pct": 73.7,
+   "dist_mean": 14.19,
+   "dist_min": 3.72,
+   "too_close_s": 0.0,
+   "relock_s": "never",
+   "clearance_m": 1.04,
+   "tick_ms_mean": 28.94,
+   "tick_ms_p95": 51.51,
+   "swaps_caught": 0,
+   "states": {
+    "COASTING": 0.6,
+    "LOITER": 3.5,
+    "REACQUIRING": 7.4,
+    "SEARCHING": 20.1,
+    "TRACKING": 10.5
+   },
+   "hidden_s": 30.1,
+   "ghost_err_m": 15.44,
+   "ghost_err_5s": 8.24,
+   "ghost_err_10s": 14.92,
+   "top3_pct": 5.7,
+   "refind_s": "never",
+   "wrong_relocks": 0
+  },
+  "round_wall_end.1": {
+   "on_target_pct": 9.5,
+   "wrong_pct": 0.0,
+   "lost_pct": 90.5,
+   "dist_mean": 12.72,
+   "dist_min": 0.75,
+   "too_close_s": 1.1,
+   "relock_s": "never",
+   "clearance_m": 1.38,
+   "tick_ms_mean": 30.22,
+   "tick_ms_p95": 52.27,
+   "swaps_caught": 0,
+   "states": {
+    "COASTING": 0.6,
+    "LOITER": 10.7,
+    "REACQUIRING": 7.3,
+    "SEARCHING": 20.0,
+    "TRACKING": 3.4
+   },
+   "hidden_s": 38.6,
+   "ghost_err_m": 16.16,
+   "ghost_err_5s": 12.97,
+   "ghost_err_10s": 17.45,
+   "top3_pct": 1.1,
+   "refind_s": "never",
    "wrong_relocks": 0
   }
  },

@@ -95,6 +95,7 @@ class FollowConfig:
     scenes: SceneConfig = field(default_factory=SceneConfig)
     routes: RouteConfig = field(default_factory=RouteConfig)
     route_bias: float = 2.0             # the v2 search overrules the route only when this much better
+    look_gate_growth: float = 0.3       # m/s: a clear look-alike is trusted this much further per s lost (after 5 s)
     room_gate_m: float = 4.0            # room route: re-lock on anyone this close to the building's mapped box
     # v4: see a turn coming while following (wall or corner ahead of them on the
     # map): close in and move to the outside of the turn. Needs the map.
@@ -156,6 +157,7 @@ class FollowTarget:
         self.route_kind: Optional[str] = None       # scene whose route is being flown
         self._scene_t = -1e9
         self._lost_vel: Optional[tuple] = None
+        self._now = 0.0
         self._route_check_t = -1e9
         self._route_overruled = False
 
@@ -184,6 +186,7 @@ class FollowTarget:
              other_tracks: Optional[dict] = None) -> FollowStatus:
         """tracks: front-camera tracks. other_tracks: {camera name: tracks}
         from the rest of the rig (same frame size), if the drone has them."""
+        self._now = t
         c = self.cfg
         dt = 0.05 if self._last_t is None else max(1e-3, t - self._last_t)
         self._last_t = t
@@ -384,7 +387,11 @@ class FollowTarget:
             if v is not None and v < 0.0:
                 return None                                   # doesn't look like the target
             if d is not None and v is not None and v >= 0.05:
-                d = max(0.0, d - self.appearance.cfg.gate_bonus_m)   # clearly them: trust it further out
+                # clearly them: trust it further out, and further the longer
+                # they've been gone (the guess of where they are only gets worse)
+                lost_for = 0.0 if self._last_seen_t is None else max(0.0, self._now - self._last_seen_t)
+                bonus = self.appearance.cfg.gate_bonus_m + self.cfg.look_gate_growth * max(0.0, lost_for - 5.0)
+                d = max(0.0, d - bonus)
             return d
         return g
 
@@ -654,6 +661,12 @@ class FollowTarget:
                                               drone_xy=tuple(telem.position[:2]),
                                               max_alt=c.viewpoints.max_alt)
         sc = self.scene
+        # A plain wall (or a hall's walls) has no inside: don't let the belief
+        # park the person "inside" it, or it never looks anywhere else.
+        if sc.kind in ("wall", "hall") and sc.cert >= c.scenes.no_doors_cert:
+            self.belief.set_doors(False)
+        elif sc.kind == "room":
+            self.belief.set_doors(True)
         if sc.kind is not None and sc.cert >= c.scenes.commit and sc.kind != self.route_kind:
             # sure enough (first time, or the map now says it's something else): fly its route
             route = build_route(sc, self._search_alt(telem), c.routes)

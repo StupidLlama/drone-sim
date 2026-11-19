@@ -446,6 +446,17 @@ Unity hovers if no command arrives for 0.5 s; Python hovers if frames stop for 0
 
 ## What's tested and what isn't
 
+* **v4.1 fix: lost after going round a wall end (1 new test + scenario, 61 + 1 skipped):**
+  Evan went round two corners of a high wall and the drone never re-locked, even when he
+  was back in view. The belief had parked ~85% of its guesses "inside" the wall end
+  (every bump against the wall rolled the "went through a door" dice again, resampling
+  jittered guesses into the wall where no camera can clear them), so the drone stared at
+  the wall and refused anyone elsewhere. Now each guess decides door-or-not once, nobody
+  goes inside a wall or hall the classifier is ≥60% sure of, guesses aren't jittered into
+  walls, and a clear look-alike is trusted 0.3 m further per second after 5 s lost. New
+  scenario `round_wall_end`: never re-found -> 6.1 s walking / 10.5 s running; suite 2
+  75.9 -> 83.9 (v4 re-run on the new scenario), nothing else worse.
+
 * **v4 turn anticipation (1 new test, 60 + 1 skipped in all):** walking up the side of a
   building toward its corner gives "corner ahead, right" and a move to the outside (west);
   walking at a wall with open space on one side gives "wall ahead" toward that side; open

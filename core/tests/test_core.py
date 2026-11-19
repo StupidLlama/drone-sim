@@ -976,3 +976,20 @@ def test_turn_anticipation_closes_in_and_swings_to_the_outside():
     a.reset()
     assert a.advise(0.0, (-5.0, 0.0), (0.0, 1.4), _BoxMap([])) is None
     assert a.advise(0.0, (-0.4, 18.0), (0.0, 0.1), bld) is None
+
+
+def test_belief_does_not_park_everyone_inside_a_plain_wall():
+    """Evan, 2026-11-19: round the end of a high wall the drone stared at the
+    wall forever. Bumping along a wall used to roll the 'went in a door' dice
+    every time, so most guesses ended up 'inside' it."""
+    from drone_core.usecases.target_belief import TargetBelief, INSIDE
+    b = TargetBelief()
+    b.set_map(_WallMap(), 0.0)
+    b.seed((3.0, 0.0), (1.4, 0.0), 0.0)
+    for k in range(1, 101):
+        b.predict(0.2 * k)
+    assert b.w[b.mode == INSIDE].sum() < 0.35                    # each guess decides once: ~25%
+    b.set_doors(False)                                            # the classifier says: plain wall
+    assert b.w[b.mode == INSIDE].sum() == 0.0
+    b.predict(30.0)
+    assert b.w[b.mode == INSIDE].sum() == 0.0

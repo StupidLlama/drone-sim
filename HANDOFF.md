@@ -20,6 +20,11 @@ Paste this file (or point the new thread at it) to pick up where the last thread
 - Keys in Unity: V ghost target, Z scan route, X 3D map, B battery, Q/E or right-drag chase camera.
 - Keys in Python HUD: `[` `]` rotate the 3D map panel.
 
+## v4.1 fix (2026-11-19): round_wall_end never re-found -> 6.1 s / 10.5 s
+Belief INSIDE pile-up at a plain wall: door decided once per particle (`slid`), `set_doors(False)` when the
+scene is wall/hall at >= 0.6, no resample jitter into walls, births on walls step back; appearance gate
+bonus grows 0.3 m/s after 5 s lost (`look_gate_growth`). Suite 2 (with round_wall_end): v4 75.9 -> v4.1 83.9.
+
 ## Current state: v4 (suite 1 92.7, occlusion suite 2: v1 64.2, v2 84.1, v3 83.6, v4 84.6)
 v4 (2026-11-18): `usecases/turn_anticipation.py` while following with the map: wall ahead of the target
 (likely turn = more open side) or a wall beside them that ends (corner) -> follow at 65% distance (>= 3 m,
