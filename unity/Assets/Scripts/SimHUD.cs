@@ -37,7 +37,7 @@ public class SimHUD : MonoBehaviour
             s += "\nTarget: WASD move, Shift run, T cycle Manual/Waypoints/Wander\n" +
                  "Drone: M manual override (I/K fwd, J/L strafe, U/O yaw, Y/H up/down)\n" +
                  "Camera: Q/E or right-drag to orbit, C change view\n" +
-                 "G wind on/off   B low battery   P camera previews   N sonar beams   V ghost   X 3D map   R reset   F1 hide help\n" +
+                 "G wind on/off   B low battery   P camera previews   N sonar beams   V ghost   Z scan route   X 3D map   R reset   F1 hide help\n" +
                  "Python window: F follow, H return home, Space hold";
         var style = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, richText = true, fontSize = 13 };
         GUI.Box(new Rect(10, 10, 520, showHelp ? 212 : 100), s, style);

@@ -133,6 +133,8 @@ class TargetBelief:
             self.mode = np.where(rng.random(n) < 0.6, STOP, WALK)
         self.mode = self.mode.astype(np.int8)
         self.turn = np.radians(rng.uniform(*c.turn_rate_deg, n)) * rng.choice((-1.0, 1.0), n)
+        self.slid = np.zeros(n, bool)                 # already decided "no door here" at a wall
+        self.allow_doors = True
         self.w = np.full(n, 1.0 / n)
         self.active = True
         self.t = self.t0 = t
@@ -145,6 +147,33 @@ class TargetBelief:
             return
         self._mask_t = t
         self._mask = obstacle_map.obstacle_mask(*self.cfg.person_z)
+        km = getattr(obstacle_map, "known_mask", None)
+        self._known = km(*self.cfg.person_z) if km is not None else None
+
+    def set_doors(self, allow: bool) -> None:
+        """False = what they vanished behind has no inside (a plain wall, the
+        scene classifier says): nobody goes INSIDE, and anyone who already did
+        is standing at the wall instead."""
+        self.allow_doors = allow
+        if not allow and self.active:
+            inside = self.mode == INSIDE
+            if inside.any():
+                self.mode[inside] = STOP
+                self.slid[inside] = True
+                self._clusters = None
+
+    def _seen_free(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """True where the map has seen open ground at person height."""
+        known = getattr(self, "_known", None)
+        if self._mask is None or known is None:
+            return np.zeros(len(x), bool)
+        mask, origin, res = self._mask
+        ix = np.floor((x - origin[0]) / res).astype(int)
+        iy = np.floor((y - origin[1]) / res).astype(int)
+        ok = (ix >= 0) & (ix < mask.shape[1]) & (iy >= 0) & (iy < mask.shape[0])
+        out = np.zeros(len(x), bool)
+        out[ok] = known[iy[ok], ix[ok]] & ~mask[iy[ok], ix[ok]]
+        return out
 
     def _blocked(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         if self._mask is None:
@@ -203,8 +232,16 @@ class TargetBelief:
         if hit.any():
             # Walked into a wall. Most slide along it (turn 90 deg either way),
             # some went through a door we can't see (INSIDE: wait in there).
-            enter = hit & (rng.random(n) < c.enter_prob) & (m != INSIDE)
+            # Each particle decides once, at its first wall: door or not. (Deciding
+            # at every bump let a person walking along a wall end up 80% "inside"
+            # a plain wall.) And no door into a thin wall: open ground seen 1 m
+            # behind it means there's no inside to go into.
+            thin = self._seen_free(self.x + np.sin(self.h), self.y + np.cos(self.h))
+            enter = hit & ~self.slid & ~thin & (rng.random(n) < c.enter_prob) & (m != INSIDE)
+            if not getattr(self, "allow_doors", True):
+                enter[:] = False
             slide = hit & ~enter
+            self.slid |= slide
             self.h[slide] += rng.choice((-0.5 * math.pi, 0.5 * math.pi), int(slide.sum()))
             # INSIDE particles stay at the door they went through (where they'll come out)
             nx[hit], ny[hit] = self.x[hit], self.y[hit]
@@ -285,22 +322,31 @@ class TargetBelief:
         c, rng, n = self.cfg, self.rng, self.cfg.n
         pos = (rng.random() + np.arange(n)) / n
         idx = np.minimum(np.searchsorted(np.cumsum(self.w), pos), n - 1)
-        for a in ("x", "y", "v", "h", "vpref", "turn", "mode"):
+        for a in ("x", "y", "v", "h", "vpref", "turn", "mode", "slid"):
             setattr(self, a, getattr(self, a)[idx].copy())
-        self.x += rng.normal(0, c.jitter_m, n)
-        self.y += rng.normal(0, c.jitter_m, n)
+        jx, jy = rng.normal(0, c.jitter_m, n), rng.normal(0, c.jitter_m, n)
+        # don't jitter anyone into a wall (a particle inside a wall can never be
+        # seen, so negative information can't clear it and it soaks up the weight)
+        into = self._blocked(self.x + jx, self.y + jy) & (self.mode != INSIDE)
+        jx[into] = jy[into] = 0.0
+        self.x += jx
+        self.y += jy
         # A few "births": the person could be somewhere near what we believe
         # but where no particle went. Keeps the cloud from collapsing on a wrong guess.
         k = int(c.birth_frac * n)
         if k:
             b = rng.choice(n, k, replace=False)
+            x0, y0 = self.x[b].copy(), self.y[b].copy()
             self.x[b] += rng.normal(0, c.birth_sd_m, k)
             self.y[b] += rng.normal(0, c.birth_sd_m, k)
             self.mode[b] = np.where(rng.random(k) < 0.5, STOP, WALK)
             self.h[b] = rng.uniform(-math.pi, math.pi, k)
             self.v[b] = 0.0
             bad = self._blocked(self.x[b], self.y[b])
-            self.mode[b[bad]] = INSIDE
+            # landed on a wall: step back out (a plain wall has no inside)
+            self.x[b[bad]], self.y[b[bad]] = x0[bad], y0[bad]
+            self.mode[b[bad]] = np.where(self.mode[b[bad]] == INSIDE, INSIDE, STOP)
+            self.slid[b] = True
         self.w = np.full(n, 1.0 / n)
         self._clusters = None
 

@@ -95,6 +95,7 @@ def main() -> None:
     p.add_argument("--target-height", type=float, default=1.8, help="height of the person being followed (m)")
     p.add_argument("--orbit", type=float, default=0.0, help="lateral m/s while following")
     p.add_argument("--no-hud", action="store_true")
+    p.add_argument("--hud-map", action="store_true", help="also draw the 3-D map in the Python window (Unity shows it: X)")
     p.add_argument("--log", default=None, help="write a CSV flight log (plot with tools/plot_log.py)")
     p.add_argument("--latency", type=float, default=0.08, help="camera-to-command delay to predict across (s)")
     p.add_argument("--geofence", type=float, default=80.0, help="auto return-home beyond this many metres (0 = off)")
@@ -175,7 +176,7 @@ def main() -> None:
     hud = None
     if not args.no_hud:
         from drone_core.adapters.hud import HudWindow
-        hud = HudWindow(on_key=on_key, surround_map=smap, follow=follow, voxel_map=vmap)
+        hud = HudWindow(on_key=on_key, surround_map=smap, follow=follow, voxel_map=vmap, map3d=args.hud_map)
     recorder = None
     if args.log:
         from drone_core.adapters.recorder import CsvRecorder

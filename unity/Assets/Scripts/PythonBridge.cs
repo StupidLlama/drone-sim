@@ -4,7 +4,8 @@
 //   Unity->Py  FRAME(1):   uint32 BE header_len | header JSON | JPEG per camera | depth per camera
 //   Py->Unity  COMMAND(2): JSON {forward,right,up (m/s), yaw_rate (rad/s, + = right),
 //                               optional est:{has,x,y,h,r,state} = where Python thinks the target is,
-//                               est.modes:[{x,y,w}] = v2 top guesses while hidden}
+//                               est.modes:[{x,y,w}] = v2 top guesses while hidden,
+//                               est.route:{kind,cert,active,i,pts:[{x,y,z}]} = v3 scene + scan route}
 //              RESET(5):   empty
 //              MAP(6):     uint32 LE n | float32 LE voxel size | n x int16 LE (x,y,z cm, core frame) -> MapView
 using System;
@@ -32,7 +33,9 @@ public class PythonBridge : MonoBehaviour
 
 #pragma warning disable 0649 // assigned by JsonUtility
     [Serializable] class ModeMsg { public float x, y, w; }
-    [Serializable] class EstMsg { public int has; public float x, y, h, r; public string state; public ModeMsg[] modes; }
+    [Serializable] class PtMsg { public float x, y, z; }
+    [Serializable] class RouteMsg { public string kind; public float cert; public int active, i; public PtMsg[] pts; }
+    [Serializable] class EstMsg { public int has; public float x, y, h, r; public string state; public ModeMsg[] modes; public RouteMsg route; }
     [Serializable] class CommandMsg { public float forward, right, up, yaw_rate; public EstMsg est; }
 #pragma warning restore 0649
 
@@ -50,6 +53,9 @@ public class PythonBridge : MonoBehaviour
     Vector4 _est;                 // x, y (= Unity x, z), h, r of where Python thinks the target is
     string _estState = "";
     double _estTime = -1;
+    // v3: the scene + scan route (route points in Unity world: x, height, z)
+    public struct RouteInfo { public string kind; public float cert; public bool active; public int next; public Vector3[] pts; }
+    RouteInfo _route;
     Vector3[] _modes = new Vector3[0];   // v2: other guesses (x, y = Unity x, z; z = weight), heaviest first
     readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     // Capacity 2: if Python is slow we drop frames instead of building latency.
@@ -86,6 +92,12 @@ public class PythonBridge : MonoBehaviour
     public Vector3[] GetEstimateModes()
     {
         lock (_cmdLock) return _modes;
+    }
+
+    /// <summary>v3: what the drone thinks the target vanished behind and the scan route it flies. pts empty = none.</summary>
+    public RouteInfo GetRoute()
+    {
+        lock (_cmdLock) return _route;
     }
 
     public bool TryGetEstimate(out Vector4 est, out string state)
@@ -172,6 +184,16 @@ public class PythonBridge : MonoBehaviour
                         var modes = new Vector3[n];
                         for (int i = 0; i < n; i++) modes[i] = new Vector3(m.est.modes[i].x, m.est.modes[i].y, m.est.modes[i].w);
                         _modes = modes;
+                        var r = m.est.route;
+                        var info = new RouteInfo { kind = "", pts = new Vector3[0] };
+                        if (r != null && !string.IsNullOrEmpty(r.kind))
+                        {
+                            int np = r.pts == null ? 0 : r.pts.Length;
+                            var pts = new Vector3[np];
+                            for (int k = 0; k < np; k++) pts[k] = new Vector3(r.pts[k].x, r.pts[k].z, r.pts[k].y);  // core (x, y, z up) -> Unity (x, y up, z)
+                            info = new RouteInfo { kind = r.kind, cert = r.cert, active = r.active == 1, next = r.i, pts = pts };
+                        }
+                        _route = info;
                     }
                 }
             }

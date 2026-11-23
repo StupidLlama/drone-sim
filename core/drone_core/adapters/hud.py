@@ -224,8 +224,9 @@ def draw_map3d(result: TickResult, voxel_map=None, follow=None, size: int = 480,
     return img
 
 
-def draw_rig(result: TickResult, surround_map=None, follow=None, voxel_map=None, view_yaw_deg: float = 0.0):
-    """2x2 camera mosaic + top-down map (+ 3-D map view when there is a voxel map)."""
+def draw_rig(result: TickResult, surround_map=None, follow=None, voxel_map=None, view_yaw_deg: float = 0.0,
+             map3d: bool = True):
+    """2x2 camera mosaic + top-down map (+ 3-D map view when there is a voxel map and map3d)."""
     st = result.status
     locked = (st.target.track_id, st.target.camera) if st.target else None
     order = ["front", "right", "left", "back"]
@@ -242,7 +243,7 @@ def draw_rig(result: TickResult, surround_map=None, follow=None, voxel_map=None,
     m = draw_map(result, surround_map, follow, size=mosaic.shape[0], voxel_map=voxel_map)
     label(m, "TOP-DOWN MAP", (0, 0), bg=(40, 40, 40))
     panels = [mosaic, m]
-    if voxel_map is not None:
+    if voxel_map is not None and map3d:
         panels.append(draw_map3d(result, voxel_map, follow, size=mosaic.shape[0], view_yaw_deg=view_yaw_deg))
     out = np.hstack(panels)
     c = st.command
@@ -259,13 +260,17 @@ def draw_rig(result: TickResult, surround_map=None, follow=None, voxel_map=None,
 
 
 class HudWindow:
-    def __init__(self, name: str = "drone core", on_key=None, surround_map=None, follow=None, voxel_map=None):
+    def __init__(self, name: str = "drone core", on_key=None, surround_map=None, follow=None, voxel_map=None,
+                 map3d: bool = False):
         self.name = name
         self.quit = False
         self.on_key = on_key      # called with the pressed character
         self.surround_map = surround_map
         self.follow = follow
         self.voxel_map = voxel_map
+        # The 3-D map is drawn in Unity (X key). The Python copy costs CPU and
+        # memory, so it is off unless asked for (--hud-map).
+        self.map3d = map3d
         self.max_fps = 10.0
         self.view_yaw = 0.0       # 3-D map view angle around the drone, degrees
         self._last_draw = 0.0
@@ -277,7 +282,7 @@ class HudWindow:
             return
         self._last_draw = now
         if result.multi is not None and len(result.multi.frames) > 1:
-            img = draw_rig(result, self.surround_map, self.follow, self.voxel_map, self.view_yaw)
+            img = draw_rig(result, self.surround_map, self.follow, self.voxel_map, self.view_yaw, self.map3d)
         else:
             img = draw(result)
         cv2.imshow(self.name, img)
