@@ -220,6 +220,13 @@ SUITE2 = [
                                                           ("wait", (0.0, 8.0)[v]), (18.0, 13.5, 1.5),
                                                           (18.0, 26.0, 1.5))),
              start_yaw_to_target=True, suite=2, variants=("walks through", "stops 8 s inside")),
+    Scenario("round_wall_end", "goes round the end of a 12 m, 4 m high wall (two corners) and back along "
+             "the far side, walking / running (Evan's Unity run, 2026-11-19)", 45,
+             lambda v: MockWorldConfig(target_colors=(RED, BLUE), boxes=(_wall(0, 13, 12, 13, 4.0),),
+                                       target_path=_route((-6, 12.4), (12.6, 12.4, (1.5, 3.0)[v]),
+                                                          (12.6, 13.6, (1.5, 3.0)[v]), (0.0, 13.6, (1.5, 3.0)[v]),
+                                                          (-6.0, 20.0, (1.5, 3.0)[v]))),
+             start_yaw_to_target=True, suite=2, variants=("walking", "running")),
 ]
 ALL_SCENARIOS = SCENARIOS + SUITE2
 

@@ -20,7 +20,18 @@ Paste this file (or point the new thread at it) to pick up where the last thread
 - Keys in Unity: V ghost target, Z scan route, X 3D map, B battery, Q/E or right-drag chase camera.
 - Keys in Python HUD: `[` `]` rotate the 3D map panel.
 
-## Current state: v3 (suite 1 92.7, occlusion suite 2 with into_hall: v1 64.2, v2 84.1, v3 83.6)
+## v4.1 fix (2026-11-19): round_wall_end never re-found -> 6.1 s / 10.5 s
+Belief INSIDE pile-up at a plain wall: door decided once per particle (`slid`), `set_doors(False)` when the
+scene is wall/hall at >= 0.6, no resample jitter into walls, births on walls step back; appearance gate
+bonus grows 0.3 m/s after 5 s lost (`look_gate_growth`). Suite 2 (with round_wall_end): v4 75.9 -> v4.1 83.9.
+
+## Current state: v4 (suite 1 92.7, occlusion suite 2: v1 64.2, v2 84.1, v3 83.6, v4 84.6)
+v4 (2026-11-18): `usecases/turn_anticipation.py` while following with the map: wall ahead of the target
+(likely turn = more open side) or a wall beside them that ends (corner) -> follow at 65% distance (>= 3 m,
+not when they walk toward the drone) and move 2.5 m to the outside of the turn; held 1.5 s
+(`FollowConfig.anticipate`). Room route also re-locks on anyone within 4 m of the building (`room_gate_m`).
+turn_at_corner now never lost (93.9 -> 100%), u_turn_hidden 92.0 -> 93.2. 60 tests + 1 skip.
+
 v3 (2026-11-18, Evan's idea A): `usecases/obstacle_type.py` classifies what the target vanished behind
 (wall / hall / room, certainty, commit at 0.8, re-classified every 0.5 s), `usecases/scan_routes.py`
 builds that scene's route (wall: swing wide past the end then along the hidden side; low wall: one look
@@ -47,16 +58,15 @@ Without a map (`--no-map`, real mode) the flight is still v1; the belief only dr
 - Not verified inside Evan's Unity yet: the Unity map view (X). C# compiles against Unity refs.
 
 ## Rules for the next thread
-1. After every update run `python tools/benchmark.py --version vN --notes "..."` from `core/` and show a before/after table. Next version is **v4**.
+1. After every update run `python tools/benchmark.py --version vN --notes "..."` from `core/` and show a before/after table. Next version is **v5**.
 2. Sync: after any change, md5-compare every file against both PC folders and push all differences, not just the files you touched (stale files broke Evan's runs twice).
 3. Keep the Python protocol (`adapters/unity/protocol.py`) and C# (`PythonBridge.cs`) in sync.
 4. New features go in `usecases/` and depend only on `ports/`; `main.py` is the only place things are wired together.
 
-## Next job: v4
-- World-frame follow that sees turns coming (Evan: "if the target is heading toward the obstacle speed up,
-  if they turn, turn with them but from the far side"): `usecases/turn_anticipation.py`.
-- Then orbit/spiral mapping while the target is idle, with one camera kept on them (Evan's idea);
+## Next job: v5
+- Orbit/spiral mapping while the target is idle, with one camera kept on them (Evan's idea);
   a gimbal would let the drone look straight down over low walls.
-- Open items: goal hints (doors/exits), give-up rule from visible-reachable mass instead of timers,
-  side/back cameras in suite 2 (it is front-camera only), suite-1 pillar_occlusion ghost without a map.
-- Benchmark: `python tools/benchmark.py --version v4 --suite all --jobs 4 --notes "..."`, compare with v3.
+- Room route timing is fragile (enters_building.1 swings 15-45% on small changes): use exits found on the map.
+- Open items: give-up rule from visible-reachable mass instead of timers, side/back cameras in suite 2
+  (front-camera only), suite-1 pillar_occlusion ghost without a map.
+- Benchmark: `python tools/benchmark.py --version v5 --suite all --jobs 4 --notes "..."`, compare with v4.

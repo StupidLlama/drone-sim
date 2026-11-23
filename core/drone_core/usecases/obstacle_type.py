@@ -52,6 +52,7 @@ class SceneConfig:
     elongated: float = 2.5      # wall: long axis / short axis at least this (else: pillar)
     unsure: float = 0.1         # "none of these" mass
     commit: float = 0.8         # certainty to commit to a scan route
+    no_doors_cert: float = 0.6  # wall / hall this sure: the belief stops guessing "went inside"
     every_s: float = 0.5        # re-classify this often while lost
 
 
