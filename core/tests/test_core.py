@@ -689,7 +689,11 @@ def test_command_carries_ghost_estimate():
     for _ in range(40):
         t += 0.05
         f.step([], W, H, t, tm)
-    assert f.estimate(t)["r"] > 4.0                        # less sure while hidden
+    e = f.estimate(t)
+    assert e["r"] >= 1.0 > 0.5                            # less sure while hidden (tracking: 0.5)
+    assert e["modes"] and abs(sum(m["w"] for m in e["modes"]) - 1.0) < 0.5   # v2: top clusters of the belief
+    body = json.loads(protocol.encode_command(VelocityCommand(), e)[5:])
+    assert len(body["est"]["modes"]) == len(e["modes"])
 
 
 def test_map_is_streamed_to_unity():
@@ -713,3 +717,279 @@ def test_map_is_streamed_to_unity():
     for _ in range(60):                                   # 3 s
         m.tick()
     assert 5 <= len(sent) <= 7 and sent[-1][1] > 0        # ~2 Hz, with blocks in it
+
+
+# ------------------------------------------------ v2: lost-target estimation
+def _mapped_world(boxes, steps=40, yaw_rate=0.0, pos=None):
+    """Hover in a world with boxes and build the 3-D map from the front depth camera."""
+    from drone_core.adapters.mock.sim import MockMultiCamera
+    from drone_core.domain.models import FOUR_CAMERA_RIG
+    from drone_core.usecases.target_geo import rig_geometry
+    from drone_core.usecases.voxel_map import VoxelMap
+    front = [m for m in FOUR_CAMERA_RIG if m.name == "front"]
+    w = MockWorld(MockWorldConfig(boxes=boxes, target_path=lambda t: (0.0, 30.0)))
+    if pos is not None:
+        w.pos[:] = pos
+    cam = MockMultiCamera(w, mounts=front, with_depth=True)
+    vm = VoxelMap(rig=rig_geometry(front))
+    for _ in range(steps):
+        w.cmd = VelocityCommand(yaw_rate=yaw_rate)
+        vm.update(w.telemetry(), cam.read_all())
+    return w, vm
+
+
+def test_mock_walls_hide_people_and_low_walls_can_be_seen_over():
+    w = MockWorld(MockWorldConfig(boxes=((-5, 8, 5, 8.4, 2.2), (-3, 14, 3, 18, 3.0)),
+                                  target_path=lambda t: (0.0, 10.0)))
+    assert w.target_box() is None                      # 2.2 m wall between drone (3 m up) and person
+    w.pos[2] = 7.0
+    assert w.target_box() is not None                  # seen over the wall from higher up
+    w.cfg.target_path = lambda t: (0.0, 16.0)          # inside the shop: hidden from anywhere
+    w.pos[2] = 12.0
+    assert w.target_box() is None
+    w.pos[:] = (0.0, 6.0, 1.0)
+    assert w.ranges()["front"] == pytest.approx(2.0, abs=0.05)   # rangefinder hits the wall
+
+
+def test_obstacle_height_query_with_known_wall():
+    """Evan's v2 step 5: the map knows how high a wall is, so the search can
+    tell whether to climb to see over it, and how high."""
+    from drone_core.usecases.viewpoints import ViewpointPlanner
+    _, vm = _mapped_world((( -5, 8, 5, 8.3, 2.2),))
+    assert vm.height_at(0.0, 8.15) == pytest.approx(2.2, abs=0.25)
+    assert vm.height_at(0.0, 5.0) is None                          # open ground
+    assert vm.top_between((0, 2), (0, 11)) == pytest.approx(2.2, abs=0.25)
+    assert vm.top_between((0, 2), (-4, 2)) is None
+    h, s = vm.top_between((0, 2), (0, 11), with_dist=True)
+    assert s == pytest.approx(6.15, abs=0.4)
+    need = ViewpointPlanner().see_over_height(vm, (0, 2), (0, 10))
+    assert 2.5 < need < 10.0                                       # climb to see the head over it
+    assert not vm.line_blocked((0, 2, need + 0.3), (0, 10, 1.6))  # and from there it is clear
+    assert vm.line_blocked((0, 2, 3.0), (0, 10, 1.6))
+    assert not vm.occupied_above(0.0, 2.0, 3.0, need + 1.0)        # nothing overhead to climb into
+
+
+def test_belief_keeps_a_person_who_stopped():
+    """v1 extrapolated a hidden walker at full speed; v2 keeps 'they stopped'
+    alive, so a person standing where they vanished still passes the gate."""
+    from drone_core.usecases.target_belief import TargetBelief
+    b = TargetBelief()
+    b.seed((0.0, 10.0), (1.2, 0.0), 0.0)
+    b.predict(8.0)
+    assert b.density(0.0, 10.0, 1.5) > 0.05                       # stopped right there
+    assert b.density(9.6, 10.0, 2.0) > 0.05                       # or walked on
+    cl = b.clusters(3)
+    assert len(cl) == 3 and abs(sum(c.w for c in cl)) <= 1.0001
+    assert {"stop", "walk"} <= {c.mode for c in cl}
+
+
+class _WallMap:
+    """Stub obstacle map: a wall along x = 5 (y anything), clear sight elsewhere."""
+    def obstacle_mask(self, z0, z1):
+        mask = np.zeros((100, 100), bool)
+        mask[:, 50:52] = True                                     # x 5.0-5.4 with origin (-5, -5), 0.2 m
+        return mask, np.array([-5.0, -5.0]), 0.2
+
+    def lines_blocked(self, a, pts):
+        x0 = a[0]
+        blocked = ((x0 < 5.0) & (pts[:, 0] > 5.0)) | ((x0 > 5.4) & (pts[:, 0] < 5.4))
+        return blocked, np.zeros(len(pts))
+
+
+def test_belief_does_not_walk_through_walls():
+    from drone_core.usecases.target_belief import TargetBelief, INSIDE
+    b = TargetBelief()
+    b.set_map(_WallMap(), 0.0)
+    b.seed((3.0, 0.0), (1.4, 0.0), 0.0)                           # walking east at the wall
+    b.predict(6.0)
+    through = (b.x > 5.4) & (b.mode != INSIDE)
+    assert b.w[through].sum() < 0.02
+    assert b.w[b.mode == INSIDE].sum() > 0.05                     # some think it went in a door
+
+
+def test_negative_information_moves_belief_to_where_we_cant_see():
+    """Looking at an empty street pushes the belief behind the wall."""
+    from drone_core.domain.models import FOUR_CAMERA_RIG
+    from drone_core.usecases.target_belief import TargetBelief
+    from drone_core.usecases.target_geo import rig_geometry
+    front = [rig_geometry(FOUR_CAMERA_RIG)["front"]]
+    class SeeThroughNothing(_WallMap):                            # a hedge you can walk round, not see past
+        def obstacle_mask(self, z0, z1):
+            m, o, r = super().obstacle_mask(z0, z1)
+            return np.zeros_like(m), o, r
+    hedge = SeeThroughNothing()
+    b = TargetBelief()
+    b.set_map(hedge, 0.0)
+    b.seed((5.2, 6.0), (0.0, 0.0), 0.0)                           # stood at the hedge: could go either side
+    b.predict(3.0)
+    hidden_before = b.w[b.x > 5.4].sum()
+    for k in range(20):                                            # 1 s looking north from (4, 0, 3)
+        b.predict(3.0 + 0.05 * (k + 1))
+        b.observe_empty((4.0, 0.0, 3.0), 0.0, front, hedge, dt=0.05)
+    assert b.w[b.x > 5.4].sum() > hidden_before + 0.05            # mass moved behind the hedge
+    seen = (b.x < 5.0) & (b.y > 3.0) & (b.y < 10.0) & (np.abs(b.x - 4.0) < b.y - 0.5)
+    assert b.w[seen].sum() < 0.03                                 # the area in view is empty
+
+
+def test_v2_finds_person_after_hidden_u_turn():
+    """Closed loop, occlusion suite: the person walks behind a wall and doubles
+    back. v1 chased the straight-line guess; v2 re-finds them quickly."""
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+    import benchmark as B
+    sc = next(s for s in B.SUITE2 if s.name == "u_turn_hidden")
+    r = B.run_scenario(sc, "hist", 0)
+    assert r["wrong_pct"] == 0.0 and r["relock_s"] is not None and r["relock_s"] != "never"
+    assert r["relock_s"] < 8.0 and r["on_target_pct"] > 85.0, r
+    assert r["clearance_m"] is None or r["clearance_m"] > 0.3
+
+
+# --- v3: what did they vanish behind? + scan routes ---------------------------------
+class _BoxMap:
+    """Stub 3-D map from boxes (x0, y0, x1, y1, h): everything seen (known), 0.2 m cells."""
+    def __init__(self, boxes, origin=(-15.0, -5.0), n=150):
+        self.res, self.org, self.n = 0.2, np.array(origin), n
+        self.boxes = boxes
+        xs = self.org[0] + (np.arange(n) + 0.5) * self.res
+        ys = self.org[1] + (np.arange(n) + 0.5) * self.res
+        X, Y = np.meshgrid(xs, ys)
+        self.top = np.full((n, n), -np.inf)
+        for x0, y0, x1, y1, h in boxes:
+            m = (X >= x0) & (X <= x1) & (Y >= y0) & (Y <= y1)
+            # only the faces are ever seen (like a camera): the inside stays unknown
+            inner = (X > x0 + 0.3) & (X < x1 - 0.3) & (Y > y0 + 0.3) & (Y < y1 - 0.3)
+            self.top[m & ~inner] = h
+            self.inner = getattr(self, "inner", np.zeros((n, n), bool)) | inner
+
+    def obstacle_mask(self, z0=0.3, z1=1.8):
+        return np.isfinite(self.top), self.org.copy(), self.res
+
+    def known_mask(self, z0=0.3, z1=1.8):
+        return ~getattr(self, "inner", np.zeros((self.n, self.n), bool))
+
+    def height_at(self, x, y):
+        ix, iy = int((x - self.org[0]) / self.res), int((y - self.org[1]) / self.res)
+        if not (0 <= ix < self.n and 0 <= iy < self.n):
+            return None
+        h = self.top[iy, ix]
+        return None if not np.isfinite(h) else float(h)
+
+    def free_above(self, x, y, z, dz=0.6):
+        return True
+
+
+def test_obstacle_type_tells_wall_hall_and_room_apart():
+    from drone_core.usecases.obstacle_type import HALL, ROOM, WALL, ObstacleClassifier
+    clf = ObstacleClassifier()
+    # a 12 m wall along y = 13; lost just past its west end, walking north
+    wall = _BoxMap([(0.0, 12.85, 12.0, 13.15, 3.0)])
+    sc = clf.classify(wall, (-0.4, 13.45), (0.0, 1.0), drone_xy=(-0.4, 8.0), belief_xy=(2.0, 13.5))
+    assert sc.kind == WALL and sc.cert >= 0.8, sc
+    assert sc.hidden[1] > 0.9                    # they're on the far (north) side of it
+    assert abs(sc.end[0]) < 0.6 and sc.out[0] < -0.9  # its end is the west one
+    # two walls 3 m apart: lost at the mouth of the hall
+    hall = _BoxMap([(2.0, 11.85, 16.0, 12.15, 3.5), (2.0, 14.85, 16.0, 15.15, 3.5)])
+    sc = clf.classify(hall, (2.5, 13.5), (1.0, 0.0), drone_xy=(-0.5, 9.0))
+    assert sc.kind == HALL and sc.cert >= 0.8, sc
+    assert sc.axis[0] > 0.9 and abs(sc.centre[1] - 13.5) < 0.4 and 2.4 < sc.width < 3.6
+    # walked straight into a 10 x 6 m shop
+    shop = _BoxMap([(2.0, 14.0, 12.0, 20.0, 3.5)])
+    sc = clf.classify(shop, (4.0, 13.4), (0.0, 1.0), inside_share=0.6, drone_xy=(1.0, 10.0))
+    assert sc.kind == ROOM and sc.cert >= 0.8, sc
+    # nothing near: no scene, no route
+    sc = clf.classify(_BoxMap([]), (0.0, 10.0), (0.0, 1.0))
+    assert sc.kind is None and sc.cert == 0.0
+
+
+def test_scan_routes_follow_the_scene():
+    from drone_core.usecases.obstacle_type import ObstacleClassifier
+    from drone_core.usecases.scan_routes import RouteRunner, build_route
+    clf = ObstacleClassifier()
+    sc = clf.classify(_BoxMap([(0.0, 12.85, 12.0, 13.15, 9.0)]), (-0.4, 13.45), (0.0, 1.0),
+                      drone_xy=(-0.4, 8.0), belief_xy=(2.0, 13.5))
+    sc.low = False
+    r = build_route(sc, 4.0)
+    assert r[0].x < -2.0                                         # swing wide past the end first
+    assert all(w.y > 13.5 for w in r[1:])                         # then along the hidden (north) side
+    assert [w.x for w in r[2:]] == sorted(w.x for w in r[2:])     # walking away from the end
+    assert all(1.5 <= w.z <= 10.0 for w in r)
+    # low wall: one look over it from our side first, under the 10 m ceiling
+    sc.low, sc.top = True, 2.2
+    r2 = build_route(sc, 4.0)
+    assert r2[0].label == "over" and r2[0].y < 13.0 and 4.0 <= r2[0].z <= 10.0
+    # hall: down the centre line, away from the mouth
+    sc = clf.classify(_BoxMap([(2.0, 11.85, 16.0, 12.15, 3.5), (2.0, 14.85, 16.0, 15.15, 3.5)]),
+                      (2.5, 13.5), (1.0, 0.0))
+    r = build_route(sc, 4.0)
+    assert len(r) >= 3 and all(abs(w.y - 13.5) < 0.5 for w in r) and r[-1].x > r[0].x + 6
+    # room: watch the door, look down both sides, then the runner loops back to the door
+    sc = clf.classify(_BoxMap([(2.0, 14.0, 12.0, 20.0, 3.5)]), (4.0, 13.4), (0.0, 1.0), inside_share=0.6)
+    r = build_route(sc, 4.0)
+    assert r[0].label == "door" and r[0].dwell > 0 and {w.label for w in r[1:]} == {"side"}
+    run = RouteRunner()
+    run.start(r, loop=True)
+    t = 0.0
+    for w in r:
+        while run.current((w.x, w.y, w.z), t) is w:
+            t += 0.1
+    assert run.i == 0 and not run.done                            # back to watching the door
+
+
+def test_people_are_cut_out_of_depth_before_mapping():
+    from drone_core.domain.models import Frame, MultiFrame
+    f = Frame(np.zeros((100, 200, 3), np.uint8), 0.0, 1)
+    depth = np.full((50, 100), 4.0, np.float32)
+    m = FollowMission.__new__(FollowMission)
+    multi = MultiFrame({"front": f}, 0.0, 1, depth={"front": depth})
+    person = Track(1, BoundingBox(80, 20, 120, 90), "person", 0.9)
+    out = m._cut_people(multi, {"front": [person]})["front"]
+    assert np.isnan(out[15, 50]) and out[2, 5] == 4.0 and not np.isnan(depth).any()   # input untouched
+
+
+def test_command_carries_scan_route():
+    import json
+    from drone_core.adapters.unity import protocol
+    est = {"x": 1.0, "y": 2.0, "state": "SEARCHING",
+           "route": {"kind": "wall", "cert": 0.874, "active": 1, "i": 1, "pts": [[0.0, 1.0, 4.0], [2.0, 3.0, 4.5]]}}
+    body = json.loads(protocol.encode_command(VelocityCommand(), est)[5:])
+    r = body["est"]["route"]
+    assert r["kind"] == "wall" and r["cert"] == 0.87 and r["i"] == 1 and r["active"] == 1
+    assert r["pts"][1] == {"x": 2.0, "y": 3.0, "z": 4.5}
+
+
+# --- v4: see the turn coming -----------------------------------------------------------
+def test_turn_anticipation_closes_in_and_swings_to_the_outside():
+    from drone_core.usecases.turn_anticipation import TurnAnticipator
+    a = TurnAnticipator()
+    # walking north up the west face of a building that ends at y = 20: corner ahead, to the right
+    bld = _BoxMap([(0.0, 12.0, 8.0, 20.0, 4.0)], origin=(-10.0, 5.0))
+    adv = a.advise(0.0, (-0.4, 18.0), (0.0, 1.4), bld)
+    assert adv is not None and adv.reason == "corner ahead" and adv.turn == 1
+    assert adv.dist_scale < 1.0 and adv.side[0] < -0.9           # move to the outside: west
+    vx, vy = a.side_speed(adv, (-0.4, 18.0), (-0.4, 12.0))        # drone right behind them
+    assert vx < 0 and abs(vy) < 1e-6
+    # walking east at a wall with open space to the south only: they'll turn right; go left (north)
+    a.reset()
+    wall = _BoxMap([(5.0, 0.0, 5.3, 20.0, 3.0), (-5.0, 11.0, 5.0, 11.3, 3.0)], origin=(-10.0, -5.0))
+    adv = a.advise(0.0, (2.5, 9.5), (1.4, 0.0), wall)
+    assert adv is not None and adv.reason == "wall ahead" and adv.turn == 1 and adv.side[1] > 0.9
+    # open ground, or standing still: no advice (after the hold time)
+    a.reset()
+    assert a.advise(0.0, (-5.0, 0.0), (0.0, 1.4), _BoxMap([])) is None
+    assert a.advise(0.0, (-0.4, 18.0), (0.0, 0.1), bld) is None
+
+
+def test_belief_does_not_park_everyone_inside_a_plain_wall():
+    """Evan, 2026-11-19: round the end of a high wall the drone stared at the
+    wall forever. Bumping along a wall used to roll the 'went in a door' dice
+    every time, so most guesses ended up 'inside' it."""
+    from drone_core.usecases.target_belief import TargetBelief, INSIDE
+    b = TargetBelief()
+    b.set_map(_WallMap(), 0.0)
+    b.seed((3.0, 0.0), (1.4, 0.0), 0.0)
+    for k in range(1, 101):
+        b.predict(0.2 * k)
+    assert b.w[b.mode == INSIDE].sum() < 0.35                    # each guess decides once: ~25%
+    b.set_doors(False)                                            # the classifier says: plain wall
+    assert b.w[b.mode == INSIDE].sum() == 0.0
+    b.predict(30.0)
+    assert b.w[b.mode == INSIDE].sum() == 0.0
